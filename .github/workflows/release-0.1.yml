@@ -33,7 +33,19 @@ jobs:
         run: npm ci
 
       - name: Build the Linux AppImage
-        run: npm run dist
+        run: |
+          if npm run dist -- --publish never > build.log 2>&1; then
+            tail -n 30 build.log
+          else
+            {
+              echo '### AppImage build failure'
+              echo '```text'
+              tail -n 100 build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            tail -n 100 build.log
+            exit 1
+          fi
 
       - name: Checksum the AppImage
         working-directory: release
