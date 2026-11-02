@@ -10,6 +10,7 @@ __pycache__/
 .env
 test-results/
 playwright-report/
+.playwright-mcp/
 .superpowers/
 .npm-cache/
 .cache/
