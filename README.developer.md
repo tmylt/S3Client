@@ -102,6 +102,8 @@ npm run test:e2e -- --grep 'bulk downloads'
 
 Configured installer targets are a Linux AppImage, macOS DMG, and Windows NSIS installer. Build each target on its corresponding operating system; signing and macOS notarization are not configured. Linux's unpacked executable is `release/linux-unpacked/s3-client`. A packaged app includes the JavaScript S3 runtime and does not need Node.js or Python installed separately.
 
+To refresh the screenshots in the user guide, run `npm run build` and then `node scripts/capture-doc-screenshots.mjs`. The script renders the built UI in headless Chrome with fictional data and does not read a saved connection or contact S3. It writes images to `docs/images/` and never opens a visible window. On Linux it uses `/usr/bin/google-chrome`.
+
 `scripts/launch-client.sh` is a checkout-based Linux launcher. It runs `release/linux-unpacked/s3-client` when available, then falls back to a built `out/` bundle with the project's Electron binary. It is not a general installer: a desktop shortcut pointing to it depends on the location of this checkout.
 
 ## Connection and S3 behavior

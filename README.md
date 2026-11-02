@@ -4,6 +4,10 @@ S3 Client is a desktop file browser for S3-compatible storage. Connections appea
 
 This guide is for people using the app. To build it from source, run tests, or change the code, see the [developer guide](README.developer.md).
 
+![S3 Client showing the connection tree and a folder's files](docs/images/browser.png)
+
+The screenshots below use fictional demo data and show the Linux app layout.
+
 ## Before you start
 
 You need an S3-compatible endpoint, a bucket name, an access key (AK), and a secret key (SK). Your account needs permission to list the bucket. Downloading, uploading, copying, renaming, and deleting also need the corresponding permissions from your storage provider.
@@ -26,6 +30,12 @@ The release also provides a [SHA-256 checksum file](https://github.com/tmylt/S3C
 3. Enter a region if your provider supplies one. Set a prefix if you want the connection to start inside a folder.
 4. Review the **Allow downloads**, **Allow uploads**, and **Allow deletes** checkboxes. Downloads are enabled by default; uploads and deletes are disabled by default.
 5. Click **Connect & browse**. The app checks the connection and opens its first folder page.
+
+![Connection form with an example endpoint, bucket, and prefix](docs/images/connection.png)
+
+Scroll down in the form to set permissions and enter your access key and secret key. The secret key stays masked unless you click the eye button.
+
+![Connection permissions and credentials with a masked example secret key](docs/images/credentials.png)
 
 | Field | What to enter |
 | --- | --- |
@@ -79,6 +89,8 @@ Only the first page is restored automatically at startup. Opening a later page r
 
 The search controls above the file list have **Range** and **Match** selectors. The default is **This folder + Exact file name**. Type a name and press **Enter** or **Search** unless you choose **This page**, which filters as you type.
 
+![Search for filenames containing invoice in all subfolders](docs/images/search.png)
+
 | Range | What it searches | Useful for |
 | --- | --- | --- |
 | **This page** | Rows already loaded on the current page. | Quick filtering without an S3 request. |
@@ -118,6 +130,8 @@ Enable **Allow deletes** in the connection settings. Click a row's delete icon, 
 ### Transfer tasks
 
 The **Downloads** and **Uploads** buttons in the header open separate task lists. Each file shows its status, bytes transferred, percentage, and current attempt's speed. The lists offer **Start**, **Stop**, and **Cancel** per task, plus **Start all**, **Stop all**, and **Cancel all**. You can set 1 to 8 concurrent tasks per direction; the default is 1.
+
+![Download task list showing progress, speed, and task controls](docs/images/downloads.png)
 
 **Stop** pauses unfinished work. **Start** retries an incomplete file from the beginning. **Cancel** removes an unfinished download's partial file and keeps completed files. Use the trash icon on a task row to remove it from the list. **Clear all** asks whether to keep unfinished tasks while removing finished rows, or cancel everything and remove every row. Removing a row does not delete an already completed local file or S3 object.
 
