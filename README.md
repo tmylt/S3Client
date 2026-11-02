@@ -8,14 +8,14 @@ This guide is for people using the app. To build it from source, run tests, or c
 
 You need an S3-compatible endpoint, a bucket name, an access key (AK), and a secret key (SK). Your account needs permission to list the bucket. Downloading, uploading, copying, renaming, and deleting also need the corresponding permissions from your storage provider.
 
-If you have an installed app or an installer from your team, open **S3 Client** from your applications menu. On Linux, an AppImage can be run directly after making it executable. For example, if the file is named `S3 Client-0.1.0.AppImage`:
+For Linux x86-64, download [S3.Client-0.1.0.AppImage](https://github.com/tmylt/S3Client/releases/download/0.1/S3.Client-0.1.0.AppImage) from the [0.1 release](https://github.com/tmylt/S3Client/releases/tag/0.1). Make it executable and run it from the download folder:
 
 ```bash
-chmod +x "S3 Client-0.1.0.AppImage"
-./"S3 Client-0.1.0.AppImage"
+chmod +x S3.Client-0.1.0.AppImage
+./S3.Client-0.1.0.AppImage
 ```
 
-Installed builds include the S3 client library; Python is not needed. This project currently has no published download link in this README. If you need to make an installer from this checkout, follow the [build instructions](README.developer.md#build-and-package).
+The release also provides a [SHA-256 checksum file](https://github.com/tmylt/S3Client/releases/download/0.1/S3.Client-0.1.0.AppImage.sha256). Download it beside the AppImage and run `sha256sum -c S3.Client-0.1.0.AppImage.sha256` to verify the download. Installed builds include the S3 client library; Python is not needed. To make an installer from this checkout, follow the [build instructions](README.developer.md#build-and-package).
 
 **Platform limitation:** Browsing, searching, and connection management are available in the desktop app. Local file transfers currently require Linux with `/proc/self/fd`; downloads also require hard-link support in the destination filesystem. Uploads and downloads on macOS and Windows are not supported by the current local file safety implementation.
 
