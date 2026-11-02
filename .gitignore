@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+release/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+.env
+test-results/
+playwright-report/
+.superpowers/
+.npm-cache/
+.cache/

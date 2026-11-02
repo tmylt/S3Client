@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=S3 Client
+Comment=Browse S3 storage in a Finder-style desktop client
+Exec=/home/plusai/work/S3Client/scripts/launch-client.sh
+TryExec=/home/plusai/work/S3Client/scripts/launch-client.sh
+Path=/home/plusai/work/S3Client
+Icon=/home/plusai/work/S3Client/assets/s3-client.svg
+Terminal=false
+Categories=System;FileManager;
+StartupNotify=true
+StartupWMClass=s3-client

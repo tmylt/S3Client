@@ -1,0 +1,15 @@
+appId: dev.s3client.desktop
+productName: S3 Client
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+mac:
+  category: public.app-category.utilities
+  target: dmg
+win:
+  target: nsis
+linux:
+  category: Utility
+  target: AppImage
