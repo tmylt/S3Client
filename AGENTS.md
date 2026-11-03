@@ -1,5 +1,10 @@
 # Project instructions
 
+## GitHub push identity
+
+- Push this repository only to `git@github.com:tmylt/S3Client.git` while SSH authenticates as `tmylt`. Never push as `skgmtmylt`.
+- Before each push, check the push URL and SSH identity. If either is not `tmylt`, correct it before pushing.
+
 ## Desktop tests and focus
 
 - Keep automated Electron and UI test windows hidden or run them on an isolated virtual display. Tests must not take focus from the user's desktop or move the system pointer.
