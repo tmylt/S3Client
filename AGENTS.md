@@ -1,9 +1,10 @@
 # Project instructions
 
-## GitHub push identity
+## GitHub identity
 
-- Push this repository only to `git@github.com:tmylt/S3Client.git` while SSH authenticates as `tmylt`. Never push as `skgmtmylt`.
-- Before each push, check the push URL and SSH identity. If either is not `tmylt`, correct it before pushing.
+- Push this repository only to `git@github.com:tmylt/S3Client.git` while SSH authenticates as `tmylt`.
+- Author new commits as `tmylt` with an email connected to that GitHub account. Do not use the inherited global author email, which GitHub attributes to `skgmtmy`.
+- Before each push, check the push URL, SSH identity, and commit author. Correct any mismatch before pushing.
 
 ## Desktop tests and focus
 
