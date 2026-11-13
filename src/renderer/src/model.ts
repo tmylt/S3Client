@@ -1,5 +1,6 @@
 import type { Entry } from '../../shared/types';
 import type { SearchMatch } from '../../shared/types';
+import { compileSearchRegex } from '../../shared/search-regex';
 
 export interface Location { connectionId: string; prefix: string }
 export interface History { entries: Location[]; index: number }
@@ -38,7 +39,12 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
 
 export function getVisibleEntries(entries: Entry[], query: string, column: SortColumn, direction: SortDirection, match: SearchMatch = 'contains'): Entry[] {
   const filter = query.toLocaleLowerCase();
-  return entries.filter(entry => !query || (match === 'exact' ? entry.name === query : match === 'prefix' ? entry.name.startsWith(query) : entry.name.toLocaleLowerCase().includes(filter))).sort((a, b) => {
+  let regex: RegExp | null = null;
+  if (query && match === 'regex') {
+    try { regex = compileSearchRegex(query); }
+    catch { return []; }
+  }
+  return entries.filter(entry => !query || (match === 'exact' ? entry.name === query : match === 'prefix' ? entry.name.startsWith(query) : match === 'regex' ? regex!.test(entry.name) : entry.name.toLocaleLowerCase().includes(filter))).sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
     let order = 0;
     if (column === 'size') order = (a.stats?.totalSize ?? a.size ?? -1) - (b.stats?.totalSize ?? b.size ?? -1);

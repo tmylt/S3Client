@@ -3,6 +3,7 @@ import { mergeEntryStats } from '../shared/folder-stats';
 import { createHash } from 'node:crypto';
 import { serializeExtraConfig } from '../shared/extra-config';
 import { defaultPageSize } from '../shared/page-size';
+import { compileSearchRegex } from '../shared/search-regex';
 import { ConnectionStore, type WorkerConnection } from './connections';
 import { ListingCache, type CacheScope } from './listing-cache';
 
@@ -75,14 +76,15 @@ export class ListingService {
   }
 
   async search(id: unknown, prefix: unknown, range: unknown, match: unknown, name: unknown, pageSize: unknown = 1000, continuationToken: unknown = null): Promise<Listing> {
-    if (range !== 'folder' && range !== 'recursive' && range !== 'key' || match !== 'exact' && match !== 'prefix' && match !== 'contains' || typeof name !== 'string' || !name || (range !== 'key' && name.includes('/')) || name.includes('\0') || (range === 'key' && match !== 'exact') ||
+    if (range !== 'folder' && range !== 'recursive' && range !== 'key' || match !== 'exact' && match !== 'prefix' && match !== 'contains' && match !== 'regex' || typeof name !== 'string' || !name || (range !== 'key' && match !== 'regex' && name.includes('/')) || name.includes('\0') || (range === 'key' && match !== 'exact') ||
       typeof pageSize !== 'number' || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000 ||
       continuationToken !== null && (range !== 'folder' || match !== 'prefix' || typeof continuationToken !== 'string' || !continuationToken || continuationToken.length > 8192 || continuationToken.includes('\0'))) {
       throw new Error('Invalid search request.');
     }
+    if (match === 'regex') compileSearchRegex(name);
     const request = await this.store.forListing(id, prefix);
     if (range === 'key' && !name.startsWith(request.connection.prefix)) throw new Error('The S3 key is outside this connection’s prefix.');
-    if (Buffer.byteLength(range === 'key' ? name : request.prefix + name, 'utf8') > 1024) throw new Error('The S3 key exceeds 1,024 bytes.');
+    if (Buffer.byteLength(match === 'regex' ? name : range === 'key' ? name : request.prefix + name, 'utf8') > 1024) throw new Error(match === 'regex' ? 'The regex pattern exceeds 1,024 bytes.' : 'The S3 key exceeds 1,024 bytes.');
     return this.worker.search(request.connection, request.prefix, range, match, name, pageSize, continuationToken);
   }
 

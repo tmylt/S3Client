@@ -2,12 +2,13 @@ import { HeadObjectCommand, ListObjectsV2Command, type ListObjectsV2CommandOutpu
 import type { Entry, FolderStats, Listing, RemoteSearchRange, SearchMatch } from '../shared/types';
 import type { WorkerConnection } from './connections';
 import { assertPrefix, connectionRoot, createS3Client, decodeKey, safeS3Error } from './s3-client';
+import { compileSearchRegex } from '../shared/search-regex';
 
 const maxActiveStats = 4;
 const statsBusyMessage = 'Four folder statistics scans are already running. Wait for one to finish, then refresh this row.';
 const validPage = (value: number) => Number.isInteger(value) && value >= 1 && value <= 1000;
 const validToken = (value: string | null) => value === null || !!value && value.length <= 8192 && !value.includes('\0');
-const matches = (candidate: string, name: string, match: SearchMatch) => match === 'exact' ? candidate === name : match === 'prefix' ? candidate.startsWith(name) : candidate.includes(name);
+const matches = (candidate: string, name: string, match: SearchMatch, regex: RegExp | null) => match === 'exact' ? candidate === name : match === 'prefix' ? candidate.startsWith(name) : match === 'regex' ? regex!.test(candidate) : candidate.includes(name);
 
 function listingPage(page: ListObjectsV2CommandOutput, prefix: string): Listing {
   const entries = new Map<string, Entry>();
@@ -101,11 +102,12 @@ export class S3Worker {
 
   async search(connection: WorkerConnection, prefix: string, range: RemoteSearchRange, match: SearchMatch, name: string, pageSize = 1000, continuationToken: string | null = null): Promise<Listing> {
     assertPrefix(connection, prefix);
-    if (!['folder', 'recursive', 'key'].includes(range) || !['exact', 'prefix', 'contains'].includes(match) || !name || name.includes('\0') ||
-      range === 'key' && (match !== 'exact' || !name.startsWith(connectionRoot(connection))) || range !== 'key' && name.includes('/') ||
+    if (!['folder', 'recursive', 'key'].includes(range) || !['exact', 'prefix', 'contains', 'regex'].includes(match) || !name || name.includes('\0') ||
+      range === 'key' && (match !== 'exact' || !name.startsWith(connectionRoot(connection))) || range !== 'key' && match !== 'regex' && name.includes('/') ||
       !validPage(pageSize) || !validToken(continuationToken) || continuationToken && (range !== 'folder' || match !== 'prefix')) throw new Error('Invalid S3 search.');
-    if (Buffer.byteLength(range === 'key' ? name : prefix + name) > 1024) throw new Error('The S3 key exceeds 1,024 bytes.');
-    const request = this.request(range === 'recursive' || match === 'contains' ? this.options.statsTimeoutMs ?? 600_000 : this.options.requestTimeoutMs ?? 120_000);
+    if (Buffer.byteLength(match === 'regex' ? name : range === 'key' ? name : prefix + name) > 1024) throw new Error(match === 'regex' ? 'The regex pattern exceeds 1,024 bytes.' : 'The S3 key exceeds 1,024 bytes.');
+    const regex = match === 'regex' ? compileSearchRegex(name) : null;
+    const request = this.request(range === 'recursive' || match === 'contains' || match === 'regex' ? this.options.statsTimeoutMs ?? 600_000 : this.options.requestTimeoutMs ?? 120_000);
     const client = this.client(connection);
     const bucket = connection.bucket;
     const foundFolder = async (key: string): Promise<Listing> => {
@@ -133,11 +135,11 @@ export class S3Worker {
       let token: string | undefined;
       do {
         const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, EncodingType: 'url', ...(range === 'folder' ? { Delimiter: '/' } : {}), ContinuationToken: token }), { abortSignal: request.controller.signal });
-        if (range === 'folder') entries.push(...listingPage(page, prefix).entries.filter(entry => matches(entry.name, name, match)));
+        if (range === 'folder') entries.push(...listingPage(page, prefix).entries.filter(entry => matches(entry.name, name, match, regex)));
         else for (const item of page.Contents ?? []) {
           if (!item.Key) continue;
           const key = decodeKey(item.Key);
-          if (!key.startsWith(prefix) || key.endsWith('/') || !matches(key.split('/').at(-1) ?? '', name, match)) continue;
+          if (!key.startsWith(prefix) || key.endsWith('/') || !matches(key.split('/').at(-1) ?? '', name, match, regex)) continue;
           entries.push({ key, name: key.slice(prefix.length), kind: 'file', size: item.Size ?? 0, modified: item.LastModified?.toISOString() ?? null, ...(item.StorageClass ? { storageClass: item.StorageClass } : {}) });
         }
         token = page.IsTruncated ? page.NextContinuationToken : undefined;

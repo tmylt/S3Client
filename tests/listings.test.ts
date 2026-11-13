@@ -31,6 +31,13 @@ describe('persistent listing service', () => {
     expect(worker.list).not.toHaveBeenCalled();
     expect((await service.connections()).cachedListings).toEqual([]);
   });
+  it('validates regex patterns before passing them to the S3 worker', async () => {
+    const { service, saved, worker } = await setup();
+    await expect(service.search(saved.id, saved.prefix, 'folder', 'regex', '^report-[0-9]+\\.csv$')).resolves.toEqual(listing);
+    expect(worker.search).toHaveBeenCalledWith(expect.anything(), saved.prefix, 'folder', 'regex', '^report-[0-9]+\\.csv$', 1000, null);
+    await expect(service.search(saved.id, saved.prefix, 'recursive', 'regex', '[')).rejects.toThrow(/regex|regular expression/i);
+    expect(worker.search).toHaveBeenCalledTimes(1);
+  });
   it('searches an exact full key anywhere inside the connection prefix', async () => {
     const { service, saved, worker } = await setup();
     const key = 'root/elsewhere/a (6)+.db';

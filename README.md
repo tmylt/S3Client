@@ -98,7 +98,9 @@ The search controls above the file list have **Range** and **Match** selectors. 
 | **All subfolders** | Objects anywhere below the current folder. | Finding a name in a nested folder; this may scan many keys. |
 | **Full S3 key** | One complete file key or folder path within the connection. | Checking a known key without listing the folder. Match is fixed to **Exact S3 key**. |
 
-**Match** can be **Prefix**, **Contains**, or **Exact file name**. An exact file name in **This folder** checks one constructed key directly. A **Full S3 key** can point to a file or a virtual folder; a trailing `/` explicitly asks for a folder. For example, if the current folder is `reports/`, search for `summary.csv` with **This folder + Exact file name**, or search for `reports/2026/summary.csv` with **Full S3 key**. Recursive and contains searches can take longer because they scan listings. S3-backed matches are case-sensitive; **This page + Contains** ignores case.
+**Match** can be **Prefix**, **Contains**, **Exact file name**, or **Regex**. An exact file name in **This folder** checks one constructed key directly. A **Full S3 key** can point to a file or a virtual folder; a trailing `/` explicitly asks for a folder. For example, if the current folder is `reports/`, search for `summary.csv` with **This folder + Exact file name**, or search for `reports/2026/summary.csv` with **Full S3 key**. Recursive, contains, and regex searches can take longer because they scan listings. S3-backed matches are case-sensitive; **This page + Contains** ignores case.
+
+**Regex** uses case-sensitive JavaScript regular expression syntax without surrounding `/` characters. For example, `^invoice-[0-9]{4}\.pdf$` matches names such as `invoice-2026.pdf`. Regex matches item names rather than full paths: **This folder** includes immediate files and folders; **All subfolders** matches file names at any depth. Invalid patterns show an error before a search starts.
 
 The search box at the right of the top toolbar accepts a full URI, such as `oss://my-bucket/reports/2026/`. It searches across saved connections with that URI scheme and bucket. If several connections match, it favors one whose configured prefix contains the key, then the connection with the longest matching folder path; a tie follows sidebar order. If no connection has that scheme and bucket, the app says so. A result outside the chosen connection's normal browsing prefix is shown read-only.
 
@@ -166,7 +168,7 @@ When operating-system secure storage is available, the app encrypts saved creden
 | **Folder not loaded** on startup | There is no saved page. Click **List folder** or **Refresh folder**. |
 | A **Cached** list is missing a recent change | Click **Refresh folder**. The app does not refresh cached pages automatically at startup. |
 | Connection or listing fails | Check the endpoint URL, bucket, signing region, AK/SK, prefix, provider-specific extra config, and `ListBucket` permission. Use **Edit connection** to correct them. |
-| A search takes a long time | **All subfolders** and **Contains** can scan many keys. Use **This folder + Exact file name** or **Full S3 key** if you know the exact name or path. |
+| A search takes a long time | **All subfolders**, **Contains**, and **Regex** can scan many keys. Use **This folder + Exact file name** or **Full S3 key** if you know the exact name or path. |
 | Upload, download, or delete button is absent | Enable the corresponding checkbox in **Edit connection** and check the provider permissions. Local transfers currently require Linux as noted above. |
 | An upload fails on a large file | Large files use multipart requests. Check that the service supports multipart upload, the account can create/upload/complete parts, and any proxy allows the file size. The task shows the failed request and recognized service error. |
 | A video waits before playing | The service may not support range requests, so the app is downloading the MP4 first. |

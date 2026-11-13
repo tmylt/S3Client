@@ -67,7 +67,7 @@ export interface BatchEntryResult { succeeded: number; failed: { key: string; me
 export interface Listing { entries: Entry[]; nextToken?: string | null }
 export type SearchRange = 'page' | 'folder' | 'recursive' | 'key';
 export type RemoteSearchRange = Exclude<SearchRange, 'page'>;
-export type SearchMatch = 'prefix' | 'contains' | 'exact';
+export type SearchMatch = 'prefix' | 'contains' | 'exact' | 'regex';
 
 export interface CachedListing extends Listing {
   connectionId: string;

@@ -820,6 +820,35 @@ describe('selected object metadata', () => {
     expect(bridge.search).not.toHaveBeenCalled();
   });
 
+  it('filters the current page by regex and reports invalid patterns without S3 calls', async () => {
+    const rows: Entry[] = [file(1), { ...file(2), key: 'report-2.csv', name: 'report-2.csv' }, { ...file(3), key: 'notes.csv', name: 'notes.csv' }];
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: rows, updatedAt: '2026-01-01T00:00:00Z' }]);
+    render(createElement(App));
+    await screen.findByText('report.txt', { exact: true });
+    fireEvent.change(screen.getByLabelText('Search range'), { target: { value: 'page' } });
+    fireEvent.change(screen.getByLabelText('Name match'), { target: { value: 'regex' } });
+    fireEvent.change(screen.getByLabelText('Search file name'), { target: { value: '^report-[0-9]+\\.csv$' } });
+    expect(screen.getByText('report-2.csv')).toBeTruthy();
+    expect(screen.queryByText('notes.csv')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Search file name'), { target: { value: '[' } });
+    expect(screen.getByRole('alert').textContent).toMatch(/invalid.*regex|regular expression/i);
+    fireEvent.change(screen.getByLabelText('Search range'), { target: { value: 'folder' } });
+    expect((screen.getByRole('button', { name: 'Search' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(bridge.search).not.toHaveBeenCalled();
+  });
+
+  it('submits regex searches for the current folder', async () => {
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [], updatedAt: '2026-01-01T00:00:00Z' }]);
+    bridge.search.mockResolvedValue({ entries: [file(1)], nextToken: null });
+    render(createElement(App));
+    await screen.findByRole('heading', { name: 'This folder is empty' });
+    fireEvent.change(screen.getByLabelText('Name match'), { target: { value: 'regex' } });
+    fireEvent.change(screen.getByLabelText('Search file name'), { target: { value: '^report\\.txt$' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await screen.findByRole('row', { name: /report.txt/ });
+    expect(bridge.search).toHaveBeenCalledWith('a', '', 'folder', 'regex', '^report\\.txt$', 1000, null);
+  });
+
   it('submits folder contains and recursive prefix with independent selectors', async () => {
     const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [], updatedAt: '2026-01-01T00:00:00Z' }]);
     bridge.search.mockResolvedValueOnce({ entries: [file(1)] }).mockResolvedValueOnce({ entries: [{ ...file(2), key: 'sub/report.txt', name: 'sub/report.txt' }] });

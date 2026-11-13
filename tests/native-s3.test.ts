@@ -79,6 +79,18 @@ describe('native S3 listing', () => {
     expect(result.entries.map(entry => entry.key)).toEqual(['root/sub dir/file.txt']);
   });
 
+  it('matches regex patterns against folder names and descendant file names', async () => {
+    const { connection, requests } = await fixture();
+    const worker = new S3Worker({}); workers.push(worker);
+    const folders = await worker.search(connection, 'root/', 'folder', 'regex', '^sub dir$');
+    expect(folders.entries.map(entry => entry.key)).toEqual(['root/sub dir/']);
+    const files = await worker.search(connection, 'root/', 'recursive', 'regex', '^file\\.txt$');
+    expect(files.entries.map(entry => entry.key)).toEqual(['root/sub dir/file.txt']);
+    const count = requests.length;
+    await expect(worker.search(connection, 'root/', 'recursive', 'regex', '[')).rejects.toThrow(/regex|regular expression/i);
+    expect(requests).toHaveLength(count);
+  });
+
   it('aborts an active request when the worker is disposed', async () => {
     const { connection, requests } = await fixture();
     const worker = new S3Worker({}); workers.push(worker);

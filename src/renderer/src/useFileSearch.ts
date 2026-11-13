@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Entry, FolderStats, RemoteSearchRange, SearchMatch, SearchRange } from '../../shared/types';
 import { getVisibleEntries, type SortColumn, type SortDirection } from './model';
 import { defaultPageSize, isPageSize } from '../../shared/page-size';
+import { compileSearchRegex } from '../../shared/search-regex';
 
 interface Result {
   connectionId: string;
@@ -24,6 +25,11 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
   const [loading, setLoading] = useState(false);
   const [recursivePage, setRecursivePage] = useState(0);
   const sequence = useRef(0);
+  const patternError = useMemo(() => {
+    if (match !== 'regex' || !query) return '';
+    try { compileSearchRegex(query); return ''; }
+    catch (cause) { return cause instanceof Error ? cause.message : 'Invalid regex pattern.'; }
+  }, [match, query]);
 
   const invalidate = useCallback(() => {
     sequence.current++;
@@ -56,22 +62,22 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
   }, [connectionId, prefix]);
 
   const submit = useCallback(() => {
-    if (range === 'page' || !query) return;
-    if ((range !== 'key' && query.includes('/')) || query.includes('\0')) { invalidate(); setError(range === 'key' ? 'Enter a valid S3 key.' : 'Enter a file name without a slash.'); return; }
+    if (range === 'page' || !query || patternError) return;
+    if ((range !== 'key' && match !== 'regex' && query.includes('/')) || query.includes('\0')) { invalidate(); setError(range === 'key' ? 'Enter a valid S3 key.' : 'Enter a file name without a slash.'); return; }
     setResult(null);
     setRecursivePage(0);
     void fetch(range, match, query, pageSize, 0, null, [null]);
-  }, [range, match, query, pageSize, fetch, invalidate]);
+  }, [range, match, query, patternError, pageSize, fetch, invalidate]);
 
   const next = useCallback(() => {
     if (!activeResult || loading) return;
-    if (range === 'recursive' || match === 'contains') { setRecursivePage(page => page + 1); return; }
+    if (range === 'recursive' || match === 'contains' || match === 'regex') { setRecursivePage(page => page + 1); return; }
     if (range === 'folder' && match === 'prefix' && activeResult.nextToken) void fetch(range, match, query, pageSize, activeResult.pageIndex + 1, activeResult.nextToken, [...activeResult.tokens, activeResult.nextToken]);
   }, [activeResult, loading, range, match, fetch, query, pageSize]);
 
   const previous = useCallback(() => {
     if (!activeResult || loading) return;
-    if (range === 'recursive' || match === 'contains') { setRecursivePage(page => Math.max(0, page - 1)); return; }
+    if (range === 'recursive' || match === 'contains' || match === 'regex') { setRecursivePage(page => Math.max(0, page - 1)); return; }
     if (range === 'folder' && match === 'prefix' && activeResult.pageIndex > 0) void fetch(range, match, query, pageSize, activeResult.pageIndex - 1, activeResult.tokens[activeResult.pageIndex - 1] ?? null, activeResult.tokens.slice(0, activeResult.pageIndex));
   }, [activeResult, loading, range, match, fetch, query, pageSize]);
 
@@ -89,12 +95,12 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
   const sorted = useCallback((column: SortColumn, direction: SortDirection) => getVisibleEntries(activeResult?.entries || [], '', column, direction), [activeResult]);
   const displayEntries = useCallback((column: SortColumn, direction: SortDirection) => {
     const entries = sorted(column, direction);
-    return range === 'recursive' || match === 'contains' ? entries.slice(recursivePage * pageSize, (recursivePage + 1) * pageSize) : entries;
+    return range === 'recursive' || match === 'contains' || match === 'regex' ? entries.slice(recursivePage * pageSize, (recursivePage + 1) * pageSize) : entries;
   }, [sorted, range, match, recursivePage, pageSize]);
-  const locallyPaged = range === 'recursive' || match === 'contains';
+  const locallyPaged = range === 'recursive' || match === 'contains' || match === 'regex';
   const hasNext = locallyPaged ? (recursivePage + 1) * pageSize < (activeResult?.entries.length || 0) : Boolean(activeResult?.nextToken);
   const pageIndex = locallyPaged ? recursivePage : activeResult?.pageIndex ?? 0;
   const active = range !== 'page' && Boolean(query) && (Boolean(activeResult) || loading || Boolean(error));
 
-  return { range, match, query, setRange, setMatch, setQuery, submit, active, result: activeResult, error, loading, pageSize, pageIndex, hasNext, next, previous, setPageSize, displayEntries, invalidate, setEntryStats };
+  return { range, match, query, patternError, setRange, setMatch, setQuery, submit, active, result: activeResult, error, loading, pageSize, pageIndex, hasNext, next, previous, setPageSize, displayEntries, invalidate, setEntryStats };
 }

@@ -47,6 +47,12 @@ describe('file list', () => {
     expect(entries[0].name).toBe('file10.txt');
   });
 
+  it('matches JavaScript regex patterns against names on the loaded page', () => {
+    const entries = [file('report-1.csv'), file('report-2.CSV'), file('report-10.csv'), file('notes.csv')];
+    expect(getVisibleEntries(entries, '^report-[0-9]+\\.csv$', 'name', 'asc', 'regex').map(item => item.name)).toEqual(['report-1.csv', 'report-10.csv']);
+    expect(getVisibleEntries(entries, '[', 'name', 'asc', 'regex')).toEqual([]);
+  });
+
   it('formats zero-byte files separately from folders and supports large sizes', () => {
     expect(formatBytes(null)).toBe('—');
     expect(formatBytes(0)).toBe('0 B');
