@@ -51,7 +51,7 @@ npm start
 
 The renderer cannot access credentials or the filesystem directly. It calls the preload API; Electron's main process validates the caller and input, then uses the AWS SDK or local file services. S3 operations use bounded timeouts and retries. Listings and statistics run asynchronously; transfer tasks have independent abort controllers.
 
-Connections and other state are stored under Electron's `userData` directory. The main files are `connections.json`, `listing-cache.json`, `transfer-queue.json`, and `window-size.json`. `S3_CLIENT_DATA_DIR` overrides `userData` when set to an existing absolute directory. On a typical Linux desktop, the default is `~/.config/s3-client/`. Credentials are encrypted with Electron's OS secure storage when it is available; otherwise they remain in memory for the session. Do not use a real credential profile for automated tests.
+Connections and other state are stored under Electron's `userData` directory. The main files are `connections.json`, `listing-cache.json`, `folder-stats-history.json`, `transfer-queue.json`, and `window-size.json`. `S3_CLIENT_DATA_DIR` overrides `userData` when set to an existing absolute directory. On a typical Linux desktop, the default is `~/.config/s3-client/`. Credentials are encrypted with Electron's OS secure storage when it is available; otherwise they remain in memory for the session. Do not use a real credential profile for automated tests.
 
 ## Day-to-day development
 
@@ -110,7 +110,7 @@ To refresh the screenshots in the user guide, run `npm run build` and then `node
 
 Connection options live in `src/shared/extra-config.ts` and are translated into AWS SDK settings by `src/main/s3-client.ts`. Supported extra JSON fields are S3 addressing style, retry mode and attempt counts, connect/read timeouts in seconds, and `s3v4` signature version. The connection's URI scheme affects displayed and copied URIs, while API requests continue to use its endpoint.
 
-Ordinary browsing requests one `ListObjectsV2` page with `/` as the delimiter and a maximum of 1,000 immediate items. Cached first pages can appear at startup without a network call. Exact name and full key searches check a single object or folder path; contains, regex, and recursive searches may scan many pages. Folder statistics scan descendants on demand without downloading their contents. Mutating operations invalidate relevant cached listings.
+Ordinary browsing requests one `ListObjectsV2` page with `/` as the delimiter and a maximum of 1,000 immediate items. Cached first pages can appear at startup without a network call. Exact name and full key searches check a single object or folder path; contains, regex, and recursive searches may scan many pages. Folder statistics scan descendants on demand without downloading their contents. Successful scans append to a separate 30-day history, while listings show only the latest result. Mutating operations invalidate relevant cached listings without removing scan history.
 
 Files over 8 MiB use multipart upload. Downloads stream into temporary files and are committed only on completion. Transfer history stores task metadata without credentials, and unfinished tasks restore as stopped. Local path validation rejects unsafe S3 names and symbolic links within selected trees; changes to transfer I/O need to preserve these protections.
 

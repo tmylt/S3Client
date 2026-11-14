@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Cloud, File, Folder, List, Trash2, Unplug, X } from 'lucide-react';
+import { ChartLine, Cloud, File, Folder, List, Trash2, Unplug, X } from 'lucide-react';
 import type { ConfirmationAnswer, ConfirmationRequest } from '../../../shared/types';
 
 interface Props {
@@ -13,11 +13,13 @@ export function ConfirmationDialog({ request, onAnswer }: Props) {
   const removing = request.kind === 'connection';
   const clearing = request.kind === 'transfer-list';
   const batch = request.kind === 'entry-batch';
-  const history = clearing || request.kind === 'transfer';
+  const transferHistory = clearing || request.kind === 'transfer';
+  const statsPoint = request.kind === 'stats-point';
+  const statsHistory = request.kind === 'stats-history';
   const batchCount = Number.parseInt(request.name, 10);
-  const action = clearing ? 'Cancel tasks and clear all' : history ? 'Remove row' : removing ? 'Remove connection' : batch ? `Delete ${batchCount} ${batchCount === 1 ? 'item' : 'items'}` : `Delete ${request.kind}`;
-  const title = clearing ? `Clear ${request.name.toLowerCase()}?` : history ? 'Remove transfer?' : batch ? 'Delete selected items?' : `${action}?`;
-  const ItemIcon = history || batch ? List : removing ? Cloud : request.kind === 'folder' ? Folder : File;
+  const action = statsPoint ? 'Delete result' : statsHistory ? 'Clear history' : clearing ? 'Cancel tasks and clear all' : transferHistory ? 'Remove row' : removing ? 'Remove connection' : batch ? `Delete ${batchCount} ${batchCount === 1 ? 'item' : 'items'}` : `Delete ${request.kind}`;
+  const title = statsPoint ? 'Delete scan result?' : statsHistory ? 'Clear folder history?' : clearing ? `Clear ${request.name.toLowerCase()}?` : transferHistory ? 'Remove transfer?' : batch ? 'Delete selected items?' : `${action}?`;
+  const ItemIcon = statsPoint || statsHistory ? ChartLine : transferHistory || batch ? List : removing ? Cloud : request.kind === 'folder' ? Folder : File;
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -50,14 +52,14 @@ export function ConfirmationDialog({ request, onAnswer }: Props) {
       <button className="icon-button dialog-close" aria-label="Close confirmation" onClick={() => onAnswer(false)}><X size={18} /></button>
       <div className="dialog-icon confirmation-icon">{removing ? <Unplug size={24} strokeWidth={1.7} /> : <Trash2 size={24} strokeWidth={1.7} />}</div>
       <h2 id="confirmation-title">{title}</h2>
-      <p id="confirmation-description" className="confirmation-description">{clearing ? 'Choose what to clear from this transfer list, including rows on other pages.' : history ? 'Remove this row from the transfer list?' : removing ? 'Remove this connection from your workspace?' : batch ? 'This will delete all selected files and folders, including the contents of selected folders.' : request.kind === 'folder' ? 'This will delete this folder and all files and subfolders inside it.' : 'This will delete this file from your S3 storage.'}</p>
+      <p id="confirmation-description" className="confirmation-description">{statsPoint ? 'Remove this saved scan result from the folder history?' : statsHistory ? 'Remove every saved scan result for this folder?' : clearing ? 'Choose what to clear from this transfer list, including rows on other pages.' : transferHistory ? 'Remove this row from the transfer list?' : removing ? 'Remove this connection from your workspace?' : batch ? 'This will delete all selected files and folders, including the contents of selected folders.' : request.kind === 'folder' ? 'This will delete this folder and all files and subfolders inside it.' : 'This will delete this file from your S3 storage.'}</p>
       <div className="confirmation-target">
         <div className={`confirmation-item-icon ${request.kind}`}><ItemIcon size={22} strokeWidth={1.5} /></div>
         <div className="confirmation-target-details"><strong>{request.name}</strong>{request.path && <span>{request.path}</span>}</div>
       </div>
       <div id="confirmation-consequence" className="confirmation-consequence">
-        <strong>{history ? 'Completed files and S3 objects will be kept.' : removing ? 'Your files in S3 will be kept.' : 'This action cannot be undone.'}</strong>
-        <p>{clearing ? 'Keep unfinished transfers (running, queued, stopped, or scanning) and remove only finished rows. Or cancel those tasks and remove every row. Transfer settings will be kept.' : history ? 'Active transfers will be cancelled before their rows are removed. Transfer settings will be kept.' : removing ? 'Saved settings and cached listings will be removed. Unfinished operations for this connection will be cancelled.' : 'Related uploads and downloads will be cancelled.'}</p>
+        <strong>{statsPoint || statsHistory ? 'S3 files and the latest folder statistics will be kept.' : transferHistory ? 'Completed files and S3 objects will be kept.' : removing ? 'Your files in S3 will be kept.' : 'This action cannot be undone.'}</strong>
+        <p>{statsPoint ? 'Only this saved scan result will be removed.' : statsHistory ? 'Only this folder’s saved scan history will be cleared. New scans will start a new history.' : clearing ? 'Keep unfinished transfers (running, queued, stopped, or scanning) and remove only finished rows. Or cancel those tasks and remove every row. Transfer settings will be kept.' : transferHistory ? 'Active transfers will be cancelled before their rows are removed. Transfer settings will be kept.' : removing ? 'Saved settings and cached listings will be removed. Unfinished operations for this connection will be cancelled.' : 'Related uploads and downloads will be cancelled.'}</p>
       </div>
       <div className={`dialog-footer confirmation-footer${clearing ? ' transfer-list' : ''}`}>
         <button ref={cancel} type="button" className="button secondary" onClick={() => onAnswer(false)}>Cancel</button>

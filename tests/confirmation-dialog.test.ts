@@ -9,6 +9,19 @@ afterEach(cleanup);
 const request: ConfirmationRequest = { id: 'request', kind: 'folder', name: 'photos', path: 's3://bucket/workspace/photos/' };
 
 describe('styled confirmation dialog', () => {
+  it.each([
+    ['stats-point', 'Delete scan result?', 'Delete result'],
+    ['stats-history', 'Clear folder history?', 'Clear history'],
+  ] as const)('confirms %s without deleting S3 files', (kind, title, action) => {
+    const onAnswer = vi.fn();
+    render(createElement(ConfirmationDialog, { request: { id: 'stats', kind, name: 'Scan history', path: 's3://bucket/folder/' }, onAnswer }));
+    const dialog = screen.getByRole('alertdialog', { name: title });
+    expect(dialog.textContent).toContain('S3 files');
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: action }));
+    expect(onAnswer).toHaveBeenCalledWith(true);
+  });
+
   it.each(['transfer', 'transfer-list'] as const)('distinguishes removing %s history from deleting files', kind => {
     const onAnswer = vi.fn();
     render(createElement(ConfirmationDialog, { request: { id: 'history', kind, name: 'Downloads', path: '' }, onAnswer }));

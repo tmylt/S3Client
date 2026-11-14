@@ -1,10 +1,11 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ConnectionStore, type SecretStorage } from './connections';
+import { ConnectionStore, validatePrefix, type SecretStorage } from './connections';
 import { S3Worker } from './s3-worker';
 import { ListingCache } from './listing-cache';
 import { ListingService } from './listings';
+import { FolderStatsHistoryStore } from './folder-stats-history';
 import { OperationRunner } from './operation-runner';
 import { TransferService } from './transfer-service';
 import { Confirmations } from './confirmations';
@@ -13,6 +14,7 @@ import { validateEntryTargets } from './batch-entries';
 import { defaultWindowSize, WindowSizeStore } from './window-size-store';
 import { VideoService } from './video-service';
 import { storageUri } from '../shared/storage-uri';
+import { parseFolderStats } from '../shared/folder-stats';
 
 if (process.env.S3_CLIENT_DATA_DIR) app.setPath('userData', process.env.S3_CLIENT_DATA_DIR);
 
@@ -49,7 +51,7 @@ function validateSender(event: IpcMainInvokeEvent): void {
 
 function registerIPC(store: ConnectionStore, worker: S3Worker, operations: OperationRunner, video: VideoService): void {
   const cache = new ListingCache(app.getPath('userData'));
-  const listings = new ListingService(store, cache, worker);
+  const listings = new ListingService(store, cache, worker, new FolderStatsHistoryStore(app.getPath('userData')));
   const service = new TransferService(store, operations, app.getPath('userData'), {
     changed: snapshot => { if (window && !window.isDestroyed()) window.webContents.send('s3:transfers-changed', snapshot); },
     storageChanged: async id => {
@@ -86,6 +88,27 @@ function registerIPC(store: ConnectionStore, worker: S3Worker, operations: Opera
   handle('s3:search', (id, prefix, range, match, name, pageSize, continuationToken) => listings.search(id, prefix, range, match, name, pageSize, continuationToken));
   handle('s3:search-uri', (id, key) => listings.searchUri(id, key));
   handle('s3:stats', (id, prefix) => listings.stats(id, prefix));
+  handle('s3:stats-history', (id, prefix) => listings.statsHistory(id, prefix));
+  const historyContext = async (id: unknown, prefix: unknown) => {
+    const points = await listings.statsHistory(id, prefix);
+    const { connections } = await store.connections();
+    const connection = connections.find(item => item.id === id);
+    if (!connection) throw new Error('This connection no longer exists.');
+    return { points, connection, target: validatePrefix(connection.prefix, prefix) };
+  };
+  handle('s3:delete-stats-history-point', async (id, prefix, value) => {
+    const point = parseFolderStats(value);
+    const { points, connection, target } = await historyContext(id, prefix);
+    if (!points.some(item => item.updatedAt === point.updatedAt && item.fileCount === point.fileCount && item.totalSize === point.totalSize && item.durationMs === point.durationMs)) throw new Error('This scan result no longer exists.');
+    if (!await confirmations.ask({ kind: 'stats-point', name: new Date(point.updatedAt).toLocaleString(), path: storageUri(connection, target) })) return null;
+    return listings.deleteStatsHistoryPoint(id, target, point);
+  });
+  handle('s3:clear-stats-history', async (id, prefix) => {
+    const { points, connection, target } = await historyContext(id, prefix);
+    if (!points.length) return [];
+    if (!await confirmations.ask({ kind: 'stats-history', name: 'All saved scans', path: storageUri(connection, target) })) return null;
+    return listings.clearStatsHistory(id, target);
+  });
   const entryKind = (kind: unknown): 'file' | 'folder' => { if (kind !== 'file' && kind !== 'folder') throw new Error('Invalid entry type.'); return kind; };
   handle('s3:download', async (id, key, value) => {
     const kind = entryKind(value);

@@ -79,7 +79,7 @@ export interface CachedListing extends Listing {
 
 export interface ConfirmationRequest {
   id: string;
-  kind: 'file' | 'folder' | 'entry-batch' | 'connection' | 'transfer' | 'transfer-list';
+  kind: 'file' | 'folder' | 'entry-batch' | 'connection' | 'transfer' | 'transfer-list' | 'stats-point' | 'stats-history';
   name: string;
   path: string;
 }
@@ -105,6 +105,9 @@ export interface S3API {
   search(connectionId: string, prefix: string, range: RemoteSearchRange, match: SearchMatch, name: string, pageSize?: number, continuationToken?: string | null): Promise<Listing>;
   searchUri(connectionId: string, key: string): Promise<Listing>;
   stats(connectionId: string, prefix: string): Promise<FolderStats>;
+  statsHistory(connectionId: string, prefix: string): Promise<FolderStats[]>;
+  deleteStatsHistoryPoint(connectionId: string, prefix: string, point: FolderStats): Promise<FolderStats[] | null>;
+  clearStatsHistory(connectionId: string, prefix: string): Promise<FolderStats[] | null>;
   copyText(text: string): Promise<void>;
   download(connectionId: string, key: string, kind: 'file' | 'folder'): Promise<string | null>;
   downloadEntries(connectionId: string, entries: EntryTarget[]): Promise<BatchEntryResult | null>;

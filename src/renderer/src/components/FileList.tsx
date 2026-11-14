@@ -28,6 +28,7 @@ interface Props {
   onCopyTo(entry: Entry): void;
   onRename(entry: Entry): void;
   onStats(entry: Entry): void;
+  onHistory(entry: Entry): void;
   getStatsState(prefix: string): FolderStatsState | undefined;
   permissions: ConnectionPermissions;
   allowStats?: boolean;
@@ -95,5 +96,5 @@ export function FileList(props: Props) {
         </tr>;
       })}</tbody>
     </table>
-  </div>{copyMenu && <RowCopyMenu entry={copyMenu.entry} x={copyMenu.x} y={copyMenu.y} onCopyUri={() => props.onCopy(copyMenu.entry)} onCopyKey={() => props.onCopyKey(copyMenu.entry)} onCopyName={() => props.onCopyName(copyMenu.entry)} onCopyTo={() => props.onCopyTo(copyMenu.entry)} canCopyTo={props.permissions.upload && !props.busyEntries.has(copyMenu.entry.key)} onRename={() => props.onRename(copyMenu.entry)} canRename={props.permissions.upload && props.permissions.delete && !props.busyEntries.has(copyMenu.entry.key)} onClose={closeCopyMenu} />}</>;
+  </div>{copyMenu && <RowCopyMenu entry={copyMenu.entry} x={copyMenu.x} y={copyMenu.y} onCopyUri={() => props.onCopy(copyMenu.entry)} onCopyKey={() => props.onCopyKey(copyMenu.entry)} onCopyName={() => props.onCopyName(copyMenu.entry)} onCopyTo={() => props.onCopyTo(copyMenu.entry)} canCopyTo={props.permissions.upload && !props.busyEntries.has(copyMenu.entry.key)} onRename={() => props.onRename(copyMenu.entry)} canRename={props.permissions.upload && props.permissions.delete && !props.busyEntries.has(copyMenu.entry.key)} onHistory={() => props.onHistory(copyMenu.entry)} canHistory={props.allowStats !== false} onClose={closeCopyMenu} />}</>;
 }

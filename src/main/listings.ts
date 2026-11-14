@@ -4,8 +4,9 @@ import { createHash } from 'node:crypto';
 import { serializeExtraConfig } from '../shared/extra-config';
 import { defaultPageSize } from '../shared/page-size';
 import { compileSearchRegex } from '../shared/search-regex';
-import { ConnectionStore, type WorkerConnection } from './connections';
+import { ConnectionStore, validatePrefix, type WorkerConnection } from './connections';
 import { ListingCache, type CacheScope } from './listing-cache';
+import { FolderStatsHistoryStore } from './folder-stats-history';
 
 interface Worker {
   list(connection: WorkerConnection, prefix: string, pageSize: number, continuationToken: string | null): Promise<Listing>;
@@ -25,7 +26,39 @@ function cacheScope(connection: Pick<Connection, 'id' | 'endpoint' | 'bucket' | 
 export class ListingService {
   private sequence = 0;
   private readonly requests = new Map<string, number>();
-  constructor(private readonly store: ConnectionStore, private readonly cache: ListingCache, private readonly worker: Worker) {}
+  constructor(private readonly store: ConnectionStore, private readonly cache: ListingCache, private readonly worker: Worker, private readonly history: FolderStatsHistoryStore) {}
+
+  private async cachedStats(connection: CacheScope, prefix: string): Promise<FolderStats | undefined> {
+    const listings = await this.cache.all([connection]).catch(() => []);
+    return listings.flatMap(item => item.entries).filter(item => item.kind === 'folder' && item.key === prefix && item.stats)
+      .map(item => item.stats!).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+  }
+
+  private async historyTarget(id: unknown, prefix: unknown): Promise<{ connection: CacheScope; target: string }> {
+    if (typeof id !== 'string') throw new Error('Invalid connection.');
+    const { connections } = await this.store.connections();
+    const selected = connections.find(item => item.id === id);
+    if (!selected) throw new Error('This connection no longer exists.');
+    return { connection: cacheScope(selected), target: validatePrefix(selected.prefix, prefix) };
+  }
+
+  async statsHistory(id: unknown, prefix: unknown): Promise<FolderStats[]> {
+    const { connection, target } = await this.historyTarget(id, prefix);
+    const recorded = await this.history.read(connection, target);
+    if (recorded !== null) return recorded;
+    const cached = await this.cachedStats(connection, target);
+    return cached ? this.history.seedIfMissing(connection, target, cached).catch(() => []) : [];
+  }
+
+  async deleteStatsHistoryPoint(id: unknown, prefix: unknown, point: unknown): Promise<FolderStats[]> {
+    const { connection, target } = await this.historyTarget(id, prefix);
+    return this.history.deletePoint(connection, target, point as FolderStats);
+  }
+
+  async clearStatsHistory(id: unknown, prefix: unknown): Promise<FolderStats[]> {
+    const { connection, target } = await this.historyTarget(id, prefix);
+    return this.history.clearFolder(connection, target);
+  }
 
   async connections(): Promise<{ connections: Connection[]; secureStorage: boolean; cachedListings: CachedListing[] }> {
     const settings = await this.store.connections();
@@ -68,7 +101,14 @@ export class ListingService {
     this.requests.set(key, ticket);
     try {
       const result = await this.worker.stats(request.connection, request.prefix);
-      if (this.requests.get(key) === ticket) await this.cache.putStats(cacheScope({ id: id as string, ...request.connection }), request.prefix, result, generation).catch(() => undefined);
+      if (this.requests.get(key) === ticket && this.cache.version(id as string) === generation) {
+        const connection = cacheScope({ id: id as string, ...request.connection });
+        await this.statsHistory(id, request.prefix).catch(() => undefined);
+        if (this.requests.get(key) === ticket && this.cache.version(id as string) === generation) {
+          await this.history.append(connection, request.prefix, result).catch(() => undefined);
+          await this.cache.putStats(connection, request.prefix, result, generation).catch(() => undefined);
+        }
+      }
       return result;
     } finally {
       if (this.requests.get(key) === ticket) this.requests.delete(key);
@@ -105,6 +145,9 @@ export class ListingService {
 
   async remove(id: unknown): Promise<void> {
     await this.store.remove(id);
-    if (typeof id === 'string') await this.cache.invalidate(id).catch(() => undefined);
+    if (typeof id === 'string') {
+      await this.cache.invalidate(id).catch(() => undefined);
+      await this.history.removeConnection(id).catch(() => undefined);
+    }
   }
 }

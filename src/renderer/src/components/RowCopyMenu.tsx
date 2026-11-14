@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Copy, FileText, FolderInput, Link, Pencil } from 'lucide-react';
+import { ChartLine, Copy, FileText, FolderInput, Link, Pencil } from 'lucide-react';
 import type { Entry } from '../../../shared/types';
 
 interface Props {
@@ -13,10 +13,12 @@ interface Props {
   canCopyTo: boolean;
   onRename(): void;
   canRename: boolean;
+  onHistory(): void;
+  canHistory: boolean;
   onClose(restoreFocus: boolean): void;
 }
 
-export function RowCopyMenu({ entry, x, y, onCopyUri, onCopyKey, onCopyName, onCopyTo, canCopyTo, onRename, canRename, onClose }: Props) {
+export function RowCopyMenu({ entry, x, y, onCopyUri, onCopyKey, onCopyName, onCopyTo, canCopyTo, onRename, canRename, onHistory, canHistory, onClose }: Props) {
   const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     menu.current?.querySelector<HTMLButtonElement>('button')?.focus();
@@ -44,11 +46,12 @@ export function RowCopyMenu({ entry, x, y, onCopyUri, onCopyKey, onCopyName, onC
   }, [onClose]);
 
   const choose = (action: () => void) => { onClose(true); action(); };
-  return <div ref={menu} className="row-copy-menu" role="menu" aria-label={`${entry.kind === 'folder' ? 'Folder' : 'File'} actions`} style={{ left: Math.max(8, Math.min(x, window.innerWidth - 196)), top: Math.max(8, Math.min(y, window.innerHeight - 208)) }}>
+  return <div ref={menu} className="row-copy-menu" role="menu" aria-label={`${entry.kind === 'folder' ? 'Folder' : 'File'} actions`} style={{ left: Math.max(8, Math.min(x, window.innerWidth - 196)), top: Math.max(8, Math.min(y, window.innerHeight - (entry.kind === 'folder' ? 244 : 208))) }}>
     <button role="menuitem" onClick={() => choose(onCopyUri)}><Link size={14} />Copy URI</button>
     <button role="menuitem" onClick={() => choose(onCopyKey)}><Copy size={14} />Copy S3 key</button>
     <button role="menuitem" onClick={() => choose(onCopyName)}><FileText size={14} />Copy {entry.kind === 'folder' ? 'folder' : 'file'} name</button>
     <button role="menuitem" disabled={!canCopyTo} title={!canCopyTo ? 'Enable uploads for this connection to copy objects' : undefined} onClick={() => choose(onCopyTo)}><FolderInput size={14} />Copy to…</button>
     <button role="menuitem" disabled={!canRename} title={!canRename ? 'Enable uploads and deletes for this connection to rename objects' : undefined} onClick={() => choose(onRename)}><Pencil size={14} />Rename…</button>
+    {entry.kind === 'folder' && <button role="menuitem" disabled={!canHistory} onClick={() => choose(onHistory)}><ChartLine size={14} />Statistics history</button>}
   </div>;
 }

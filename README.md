@@ -77,13 +77,13 @@ File modification times include hours, minutes, and seconds in your local time. 
 
 ### Folder statistics
 
-Each folder row has a statistics refresh icon. Click it to count all files in that folder and its subfolders and sum their sizes. The row shows the file count, total size, when the scan finished, and how long it took. The app reads object metadata without downloading file contents. Large folders can take time; ordinary folder browsing does not calculate these totals automatically. Click the icon again to recalculate them.
+Each folder row has a statistics refresh icon. Click it to count all files in that folder and its subfolders and sum their sizes. The row shows the latest file count, total size, when the scan finished, and how long it took. The app reads object metadata without downloading file contents. Large folders can take time; ordinary folder browsing does not calculate these totals automatically. Click the icon again to record another result. Right-click a folder and choose **Statistics history** to see both trends in one line graph and the recorded values from the last 30 days. Use **Graph range** for all saved scans, the last 24 hours, the last 7 days, or custom local start and end times. You can also drag across the graph to select a range; **All saved scans** resets it. The scan table below still shows every saved result. Click either legend item to hide or show its line. Hover near a visible line to see the nearest scan’s time and values. Use **Delete** beside a scan to remove that saved result, or **Clear all history** to remove every saved result for this folder. Both actions ask for confirmation and leave S3 files and the latest statistics in the folder list unchanged.
 
 ### Cached listings
 
 The app saves successful folder pages locally. When it opens, it selects the first connection and shows its saved first page without listing S3 again. A **Cached** label means the displayed listing may be older than the objects in your bucket; click **Refresh folder** to check S3. If no page is saved, click **List folder**. Refresh failures leave the previous listing visible and offer a retry.
 
-Only the first page is restored automatically at startup. Opening a later page requests it again. Folder statistics remain visible with their original scan time until you recalculate them. See [Where settings are saved](#where-settings-are-saved) for the cache file.
+Only the first page is restored automatically at startup. Opening a later page requests it again. The latest folder statistics remain visible with their original scan time until you recalculate them. Scan history is stored separately from the listing cache, so a listing refresh does not remove it. See [Where settings are saved](#where-settings-are-saved) for the files.
 
 ## Find an object
 
@@ -157,7 +157,7 @@ Double-click an MP4 file to open the in-app player. If the S3 service supports b
 
 ## Where settings are saved
 
-The app stores `connections.json`, `listing-cache.json`, `transfer-queue.json`, and `window-size.json` in Electron's application data folder. On a typical Linux installation, that is `~/.config/s3-client/`. The listing cache contains keys, names, sizes, dates, and folder statistics, but not file contents or credentials.
+The app stores `connections.json`, `listing-cache.json`, `folder-stats-history.json`, `transfer-queue.json`, and `window-size.json` in Electron's application data folder. On a typical Linux installation, that is `~/.config/s3-client/`. The listing cache contains keys, names, sizes, dates, and the latest folder statistics. The separate history file contains scan results from the last 30 days. Neither contains file contents or credentials.
 
 When operating-system secure storage is available, the app encrypts saved credentials. In **Edit connection**, the saved AK is shown and the SK is masked as password dots; use the eye button to reveal the SK temporarily. The edit dialog starts with the SK masked each time. A saved session token is not displayed. If secure storage is unavailable, keys remain in memory for the current session and you must re-enter them after restarting; the dialog tells you when this applies.
 

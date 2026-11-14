@@ -26,6 +26,9 @@ function api(connections: Connection[], cachedListings: CachedListing[] = []) {
     search: vi.fn<S3API['search']>().mockResolvedValue({ entries: [], nextToken: null }),
     searchUri: vi.fn<S3API['searchUri']>().mockResolvedValue({ entries: [], nextToken: null }),
     stats: vi.fn<S3API['stats']>(),
+    statsHistory: vi.fn<S3API['statsHistory']>().mockResolvedValue([]),
+    deleteStatsHistoryPoint: vi.fn<S3API['deleteStatsHistoryPoint']>().mockResolvedValue(null),
+    clearStatsHistory: vi.fn<S3API['clearStatsHistory']>().mockResolvedValue(null),
     saveConnection: vi.fn<S3API['saveConnection']>(),
     copyConnection: vi.fn<S3API['copyConnection']>(),
     reorderConnections: vi.fn<S3API['reorderConnections']>().mockResolvedValue(undefined),
@@ -362,6 +365,187 @@ describe('connection URI scheme', () => {
 });
 
 describe('folder row statistics', () => {
+  it('selects a graph time range by dragging and resets it with All saved scans', async () => {
+    const older = { fileCount: 1, totalSize: 1024, updatedAt: '2026-11-01T00:00:00Z', durationMs: 50 };
+    const middle = { fileCount: 2, totalSize: 2048, updatedAt: '2026-11-06T00:00:00Z', durationMs: 50 };
+    const latest = { fileCount: 3, totalSize: 4096, updatedAt: '2026-11-11T00:00:00Z', durationMs: 50 };
+    const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null, stats: latest };
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [folder], updatedAt: latest.updatedAt }]);
+    bridge.statsHistory.mockResolvedValue([older, middle, latest]);
+    render(createElement(App));
+    fireEvent.contextMenu(await screen.findByRole('row', { name: /directory/ }), { clientX: 120, clientY: 150 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Statistics history' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Statistics history' });
+    const chart = within(dialog).getByRole('img');
+    vi.spyOn(chart, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 700, height: 222, top: 0, right: 700, bottom: 222, left: 0, toJSON: () => ({}) });
+    const range = within(dialog).getByRole('combobox', { name: 'Graph range' });
+    fireEvent.pointerDown(chart, { button: 0, pointerId: 1, clientX: 500, clientY: 100 });
+    fireEvent.pointerMove(chart, { pointerId: 1, clientX: 200, clientY: 100 });
+    expect(chart.querySelector('.stats-history-selection')).toBeTruthy();
+    fireEvent.pointerUp(chart, { pointerId: 1, clientX: 200, clientY: 100 });
+    expect((range as HTMLSelectElement).value).toBe('custom');
+    expect((within(dialog).getByLabelText('From') as HTMLInputElement).value).toBeTruthy();
+    expect((within(dialog).getByLabelText('To') as HTMLInputElement).value).toBeTruthy();
+    expect(within(dialog).getByText('Graph: 1 of 3 scans')).toBeTruthy();
+    expect(within(dialog).getByRole('img').querySelectorAll('circle')).toHaveLength(2);
+    expect(within(dialog).getByRole('table', { name: 'Recorded scans' }).querySelectorAll('tbody tr')).toHaveLength(3);
+    fireEvent.change(range, { target: { value: 'all' } });
+    expect(within(dialog).getByText('Graph: 3 of 3 scans')).toBeTruthy();
+    expect(within(dialog).getByRole('img').querySelectorAll('circle')).toHaveLength(6);
+  });
+
+  it('changes the graph time range while keeping all saved scan rows available', async () => {
+    const older = { fileCount: 2, totalSize: 1024, updatedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(), durationMs: 50 };
+    const latest = { fileCount: 3, totalSize: 4096, updatedAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(), durationMs: 60 };
+    const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null, stats: latest };
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [folder], updatedAt: latest.updatedAt }]);
+    bridge.statsHistory.mockResolvedValue([older, latest]);
+    render(createElement(App));
+    fireEvent.contextMenu(await screen.findByRole('row', { name: /directory/ }), { clientX: 120, clientY: 150 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Statistics history' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Statistics history' });
+    const rows = within(dialog).getByRole('table', { name: 'Recorded scans' });
+    const range = within(dialog).getByRole('combobox', { name: 'Graph range' });
+    expect(within(dialog).getByRole('img').querySelectorAll('polyline')).toHaveLength(2);
+    fireEvent.change(range, { target: { value: '7d' } });
+    expect(within(dialog).getByRole('img').querySelectorAll('circle')).toHaveLength(2);
+    expect(within(dialog).getByRole('img').querySelectorAll('polyline')).toHaveLength(0);
+    expect(within(rows).getAllByRole('row')).toHaveLength(3);
+    fireEvent.change(range, { target: { value: 'custom' } });
+    const localInput = (timestamp: number) => {
+      const date = new Date(timestamp);
+      return new Date(timestamp - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
+    };
+    const start = Date.parse(older.updatedAt) - 24 * 60 * 60 * 1000;
+    const end = Date.parse(latest.updatedAt) + 24 * 60 * 60 * 1000;
+    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: localInput(start) } });
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: localInput(end) } });
+    expect(within(dialog).getByText(formatDate(new Date(start).toISOString(), true))).toBeTruthy();
+    expect(within(dialog).getByText(formatDate(new Date(end).toISOString(), true))).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: '' } });
+    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2999-01-01T00:00:00' } });
+    expect(within(dialog).getByText('No scans in this graph range.')).toBeTruthy();
+    expect(within(rows).getAllByRole('row')).toHaveLength(3);
+    expect(within(dialog).getByRole('button', { name: 'Clear all history' }).hasAttribute('disabled')).toBe(false);
+    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '' } });
+    const midpoint = new Date((Date.parse(older.updatedAt) + Date.parse(latest.updatedAt)) / 2);
+    const localMidpoint = new Date(midpoint.getTime() - midpoint.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: localMidpoint } });
+    expect(within(dialog).getByRole('img').querySelectorAll('circle')).toHaveLength(2);
+    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2999-01-01T00:00:00' } });
+    expect(within(dialog).getByText('From must be before To.')).toBeTruthy();
+    fireEvent.change(range, { target: { value: 'all' } });
+    expect(within(dialog).getByRole('img').querySelectorAll('polyline')).toHaveLength(2);
+    fireEvent.click(within(dialog).getByRole('button', { name: /File count/ }));
+    fireEvent.change(range, { target: { value: 'custom' } });
+    expect(within(dialog).getByText('From must be before To.')).toBeTruthy();
+    fireEvent.change(range, { target: { value: 'all' } });
+    expect(within(dialog).getByRole('button', { name: /File count/ }).getAttribute('aria-pressed')).toBe('false');
+    expect(within(dialog).getByRole('img').querySelectorAll('polyline')).toHaveLength(1);
+  });
+
+  it('removes confirmed history rows and clears only the current folder history', async () => {
+    const older = { fileCount: 2, totalSize: 1024, updatedAt: '2026-11-12T10:00:00Z', durationMs: 50 };
+    const latest = { fileCount: 3, totalSize: 4096, updatedAt: '2026-11-13T10:00:00Z', durationMs: 60 };
+    const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null, stats: latest };
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [folder], updatedAt: latest.updatedAt }]);
+    bridge.statsHistory.mockResolvedValue([older, latest]);
+    bridge.deleteStatsHistoryPoint.mockResolvedValueOnce(null).mockResolvedValueOnce([older]);
+    bridge.clearStatsHistory.mockResolvedValue([]);
+    render(createElement(App));
+    fireEvent.contextMenu(await screen.findByRole('row', { name: /directory/ }), { clientX: 120, clientY: 150 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Statistics history' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Statistics history' });
+    const table = within(dialog).getByRole('table', { name: 'Recorded scans' });
+    expect(within(table).getAllByRole('row')).toHaveLength(3);
+    expect(within(dialog).queryByRole('button', { name: /^Close$/ })).toBeNull();
+    const deleteButtons = within(table).getAllByRole('button', { name: /Delete scan result/ });
+    fireEvent.click(deleteButtons[0]);
+    await waitFor(() => expect(bridge.deleteStatsHistoryPoint).toHaveBeenCalledWith('a', 'directory/', latest));
+    expect(within(table).getAllByRole('row')).toHaveLength(3);
+    fireEvent.click(deleteButtons[0]);
+    await waitFor(() => expect(within(table).getAllByRole('row')).toHaveLength(2));
+    const clear = within(dialog).getByRole('button', { name: 'Clear all history' });
+    fireEvent.click(clear);
+    await waitFor(() => expect(bridge.clearStatsHistory).toHaveBeenCalledWith('a', 'directory/'));
+    await waitFor(() => expect(within(dialog).getByText(/No statistics recorded/)).toBeTruthy());
+    expect(clear.hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByRole('button', { name: 'Close statistics history' })).toBeTruthy();
+  });
+
+  it('toggles each statistics line and limits hover details to visible lines', async () => {
+    const older = { fileCount: 2, totalSize: 1024, updatedAt: '2026-11-12T10:00:00Z', durationMs: 50 };
+    const latest = { fileCount: 3, totalSize: 4096, updatedAt: '2026-11-13T10:00:00Z', durationMs: 60 };
+    const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null, stats: latest };
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [folder], updatedAt: latest.updatedAt }]);
+    bridge.statsHistory.mockResolvedValue([older, latest]);
+    render(createElement(App));
+    fireEvent.contextMenu(await screen.findByRole('row', { name: /directory/ }), { clientX: 120, clientY: 150 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Statistics history' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Statistics history' });
+    const chart = within(dialog).getByRole('img', { name: 'Total size and file count over time' });
+    const sizeToggle = within(dialog).getByRole('button', { name: /Total size/ });
+    const countToggle = within(dialog).getByRole('button', { name: /File count/ });
+    vi.spyOn(chart, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 700, height: 222, top: 0, right: 700, bottom: 222, left: 0, toJSON: () => ({}) });
+    expect(sizeToggle.getAttribute('aria-pressed')).toBe('true');
+    expect(countToggle.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(sizeToggle);
+    expect(sizeToggle.getAttribute('aria-pressed')).toBe('false');
+    expect(chart.querySelectorAll('polyline')).toHaveLength(1);
+    fireEvent.mouseMove(chart, { clientX: 86, clientY: 156 });
+    expect(within(dialog).queryByRole('tooltip')).toBeNull();
+    fireEvent.mouseMove(chart, { clientX: 86, clientY: 90 });
+    expect(within(within(dialog).getByRole('tooltip')).getByText('2 files')).toBeTruthy();
+    expect(within(within(dialog).getByRole('tooltip')).queryByText('Total size')).toBeNull();
+    fireEvent.click(countToggle);
+    expect(countToggle.getAttribute('aria-pressed')).toBe('false');
+    expect(chart.querySelectorAll('polyline')).toHaveLength(0);
+    expect(within(dialog).queryByRole('tooltip')).toBeNull();
+    fireEvent.click(sizeToggle);
+    fireEvent.mouseMove(chart, { clientX: 86, clientY: 156 });
+    expect(within(within(dialog).getByRole('tooltip')).getByText('1 KB')).toBeTruthy();
+    expect(within(within(dialog).getByRole('tooltip')).queryByText('File count')).toBeNull();
+    fireEvent.click(countToggle);
+    expect(chart.querySelectorAll('polyline')).toHaveLength(2);
+  });
+
+  it('opens a history chart from a folder context menu without scanning S3', async () => {
+    const older = { fileCount: 2, totalSize: 1024, updatedAt: '2026-11-12T10:00:00Z', durationMs: 50 };
+    const latest = { fileCount: 3, totalSize: 4096, updatedAt: '2026-11-13T10:00:00Z', durationMs: 60 };
+    const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null, stats: latest };
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [folder], updatedAt: latest.updatedAt }]);
+    bridge.statsHistory.mockResolvedValue([older, latest]);
+    render(createElement(App));
+    const row = await screen.findByRole('row', { name: /directory/ });
+    fireEvent.contextMenu(row, { clientX: 120, clientY: 150 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Statistics history' }));
+    expect(bridge.statsHistory).toHaveBeenCalledWith('a', 'directory/');
+    const dialog = await screen.findByRole('dialog', { name: /Statistics history/ });
+    const chart = within(dialog).getByRole('img', { name: 'Total size and file count over time' });
+    expect(within(dialog).getAllByRole('img')).toHaveLength(1);
+    expect(chart.querySelectorAll('polyline')).toHaveLength(2);
+    expect(within(dialog).getAllByText('4 KB')).toHaveLength(2);
+    expect(within(dialog).getByText('3 files')).toBeTruthy();
+    vi.spyOn(chart, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 700, height: 222, top: 0, right: 700, bottom: 222, left: 0, toJSON: () => ({}) });
+    fireEvent.mouseMove(chart, { clientX: 613, clientY: 38 });
+    let tooltip = within(dialog).getByRole('tooltip');
+    expect(within(tooltip).getByText('4 KB')).toBeTruthy();
+    expect(within(tooltip).getByText('3 files')).toBeTruthy();
+    fireEvent.mouseMove(chart, { clientX: 86, clientY: 156 });
+    tooltip = within(dialog).getByRole('tooltip');
+    expect(within(tooltip).getByText('1 KB')).toBeTruthy();
+    expect(within(tooltip).getByText('2 files')).toBeTruthy();
+    fireEvent.mouseMove(chart, { clientX: 350, clientY: 97 });
+    tooltip = within(dialog).getByRole('tooltip');
+    expect(within(tooltip).getByText('Total size')).toBeTruthy();
+    expect(within(tooltip).getByText('File count')).toBeTruthy();
+    fireEvent.mouseMove(chart, { clientX: 350, clientY: 180 });
+    expect(within(dialog).queryByRole('tooltip')).toBeNull();
+    expect(bridge.stats).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close statistics history' }));
+    expect(screen.queryByRole('dialog', { name: /Statistics history/ })).toBeNull();
+  });
+
   it('calculates recursively on demand, displays size/count/time, and retains results during a list refresh', async () => {
     const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null };
     const stats = { fileCount: 3, totalSize: 4096, updatedAt: '2026-10-29T10:00:00Z', durationMs: 1250 };

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConnectionStore, type SecretStorage } from '../src/main/connections';
 import { ListingCache } from '../src/main/listing-cache';
+import { FolderStatsHistoryStore } from '../src/main/folder-stats-history';
 import { ListingService } from '../src/main/listings';
 import type { ConnectionInput, Listing } from '../src/shared/types';
 
@@ -19,8 +20,9 @@ async function setup() {
   const store = new ConnectionStore(directory, storage);
   const saved = await store.save(settings);
   const cache = new ListingCache(directory);
+  const history = new FolderStatsHistoryStore(directory);
   const worker = { list: vi.fn().mockResolvedValue(listing), stats: vi.fn(), search: vi.fn().mockResolvedValue(listing) };
-  return { directory, storage, store, saved, cache, worker, service: new ListingService(store, cache, worker) };
+  return { directory, storage, store, saved, cache, history, worker, service: new ListingService(store, cache, worker, history) };
 }
 
 describe('persistent listing service', () => {
@@ -58,6 +60,45 @@ describe('persistent listing service', () => {
     await expect(service.searchUri(saved.id, 'bad\0key')).rejects.toThrow();
     await expect(service.searchUri(saved.id, 'x'.repeat(1025))).rejects.toThrow();
     expect(worker.search).toHaveBeenCalledTimes(1);
+  });
+  it('keeps an existing cached scan and each new scan in folder history', async () => {
+    const { service, saved, cache, worker } = await setup();
+    const old = { fileCount: 2, totalSize: 100, updatedAt: new Date(Date.now() - 60_000).toISOString(), durationMs: 50 };
+    const latest = { fileCount: 3, totalSize: 150, updatedAt: new Date().toISOString(), durationMs: 60 };
+    const folder = { key: 'root/folder/', name: 'folder', kind: 'folder' as const, size: null, modified: null, stats: old };
+    await cache.put(saved, saved.prefix, { entries: [folder] }, cache.version(saved.id));
+    expect(await service.statsHistory(saved.id, folder.key)).toEqual([old]);
+    expect(worker.stats).not.toHaveBeenCalled();
+    worker.stats.mockResolvedValue(latest);
+    expect(await service.stats(saved.id, folder.key)).toEqual(latest);
+    expect(await service.statsHistory(saved.id, folder.key)).toEqual([old, latest]);
+    expect((await service.connections()).cachedListings[0].entries[0].stats).toEqual(latest);
+  });
+  it('does not restore deleted history points from the cached latest result', async () => {
+    const { service, saved, cache, worker } = await setup();
+    const latest = { fileCount: 3, totalSize: 150, updatedAt: new Date(Date.now() - 60_000).toISOString(), durationMs: 60 };
+    const next = { fileCount: 4, totalSize: 200, updatedAt: new Date().toISOString(), durationMs: 70 };
+    const folder = { key: 'root/folder/', name: 'folder', kind: 'folder' as const, size: null, modified: null, stats: latest };
+    await cache.put(saved, saved.prefix, { entries: [folder] }, cache.version(saved.id));
+    expect(await service.statsHistory(saved.id, folder.key)).toEqual([latest]);
+    expect(await service.deleteStatsHistoryPoint(saved.id, folder.key, latest)).toEqual([]);
+    expect(await service.statsHistory(saved.id, folder.key)).toEqual([]);
+    worker.stats.mockResolvedValue(next);
+    await service.stats(saved.id, folder.key);
+    expect(await service.statsHistory(saved.id, folder.key)).toEqual([next]);
+    expect(await service.clearStatsHistory(saved.id, folder.key)).toEqual([]);
+    expect(await service.statsHistory(saved.id, folder.key)).toEqual([]);
+    expect((await service.connections()).cachedListings[0].entries[0].stats).toEqual(next);
+  });
+  it('reads saved history without unlocking S3 credentials', async () => {
+    const { directory, saved, history, worker } = await setup();
+    const point = { fileCount: 2, totalSize: 100, updatedAt: new Date().toISOString(), durationMs: 50 };
+    await history.append(saved, 'root/folder/', point);
+    const unavailable: SecretStorage = { isAvailable: async () => false, encrypt: async () => { throw new Error('Locked'); }, decrypt: async () => { throw new Error('Locked'); } };
+    const locked = new ListingService(new ConnectionStore(directory, unavailable), new ListingCache(directory), worker, new FolderStatsHistoryStore(directory));
+    expect(await locked.statsHistory(saved.id, 'root/folder/')).toEqual([point]);
+    await expect(locked.statsHistory(saved.id, 'outside/folder/')).rejects.toThrow(/prefix|outside/i);
+    expect(worker.stats).not.toHaveBeenCalled();
   });
   it('rejects unsafe search input before sending credentials to the worker', async () => {
     const { service, saved, worker } = await setup();
@@ -119,6 +160,21 @@ describe('persistent listing service', () => {
     await pending;
     expect((await service.connections()).cachedListings).toEqual([]);
   });
+  it.each(['save', 'remove'] as const)('does not record a scan if %s invalidates the connection while loading older history', async mutation => {
+    const { service, saved, worker, history } = await setup();
+    const result = { fileCount: 1, totalSize: 1, updatedAt: new Date().toISOString(), durationMs: 1 };
+    worker.stats.mockResolvedValue(result);
+    let release!: () => void;
+    const waiting = new Promise<void>(done => { release = done; });
+    const seed = vi.spyOn(service, 'statsHistory').mockImplementation(async () => { await waiting; return []; });
+    const pending = service.stats(saved.id, 'root/folder/');
+    await vi.waitFor(() => expect(seed).toHaveBeenCalledTimes(1));
+    if (mutation === 'save') await service.save({ ...settings, id: saved.id, name: 'Edited' });
+    else await service.remove(saved.id);
+    release();
+    await pending;
+    expect(await history.list(saved, 'root/folder/')).toEqual([]);
+  });
   it('scopes caches to extra Config options using a stable digest without storing option values', async () => {
     const { service, directory, saved, store, worker } = await setup();
     const extraConfig = { s3: { addressing_style: 'virtual' }, user_agent_extra: 'PRIVATE_OPTION_VALUE' };
@@ -138,7 +194,7 @@ describe('persistent listing service', () => {
     await cache.put(saved, saved.prefix, listing, cache.version(saved.id));
     const store = new ConnectionStore(directory, storage);
     const getCredentials = vi.spyOn(store, 'forListing');
-    const snapshot = await new ListingService(store, new ListingCache(directory), worker).connections();
+    const snapshot = await new ListingService(store, new ListingCache(directory), worker, new FolderStatsHistoryStore(directory)).connections();
     expect(snapshot.cachedListings).toEqual([expect.objectContaining({ connectionId: saved.id, prefix: saved.prefix, entries: listing.entries })]);
     expect(worker.list).not.toHaveBeenCalled();
     expect(getCredentials).not.toHaveBeenCalled();
