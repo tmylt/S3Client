@@ -1,20 +1,22 @@
 import {
   AbortMultipartUploadCommand, CompleteMultipartUploadCommand, CopyObjectCommand, CreateMultipartUploadCommand,
   DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command,
-  PutObjectCommand, UploadPartCommand, UploadPartCopyCommand, type S3Client,
+  PutObjectCommand, UploadPartCommand, UploadPartCopyCommand, type GetObjectCommandOutput, type S3Client,
 } from '@aws-sdk/client-s3';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { link, open, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute } from 'node:path';
 import type { WorkerConnection } from './connections';
+import { discardResume, readResume, resumeNames, writeResume } from './download-resume';
+import { tryParallelDownload } from './parallel-download';
 import { descriptorPath, openDirectoryAnchor, safeLocalIOMessage } from './transfer-paths';
 import { assertPrefix, connectionRoot, createS3Client, decodeKey, safeS3Error, S3Failure } from './s3-client';
 
 export type OperationName = 'manifest' | 'download' | 'upload' | 'delete' | 'copy' | 'rename';
 export interface ManifestObject { key: string; size: number; isDirectory: boolean }
-export interface OperationProgress { transferred: number; total: number }
-export interface OperationParams { connection: WorkerConnection; key?: string; destinationKey?: string; prefix?: string; kind?: 'file' | 'folder'; localPath?: string; rootPath?: string }
+export interface OperationProgress { transferred: number; total: number; resumeOffset?: number; resumeNote?: string }
+export interface OperationParams { connection: WorkerConnection; key?: string; destinationKey?: string; prefix?: string; kind?: 'file' | 'folder'; localPath?: string; rootPath?: string; resumeId?: string; sizeHint?: number }
 export interface OperationResultMap { manifest: { objects: ManifestObject[] }; download: { bytes: number }; upload: { bytes: number }; delete: { deleted: number }; copy: { copied: number }; rename: { renamed: number } }
 export interface OperationHandle<T> { promise: Promise<T>; cancel(): void }
 export class OperationError extends Error { constructor(readonly code: string, message: string) { super(message); } }
@@ -77,9 +79,9 @@ function sdk(errorValue: unknown, method: OperationName, operation?: string): Op
 
 function progress(callback: ((value: OperationProgress) => void) | undefined, total: number) {
   let last = -Infinity;
-  return (transferred: number, final = false) => {
+  return (transferred: number, final = false, resumeOffset?: number, resumeNote?: string) => {
     const now = performance.now();
-    if (callback && (final || now - last >= 250)) { last = now; try { callback({ transferred, total }); } catch { /* UI observers do not change operation outcome. */ } }
+    if (callback && (final || now - last >= 250)) { last = now; try { callback({ transferred, total, ...(resumeOffset === undefined ? {} : { resumeOffset }), ...(resumeNote ? { resumeNote } : {}) }); } catch { /* UI observers do not change operation outcome. */ } }
   };
 }
 
@@ -111,34 +113,84 @@ async function missingOnProbe(client: S3Client, connection: WorkerConnection, ke
 }
 
 async function download(client: S3Client, params: OperationParams, key: string, signal: AbortSignal, callback?: (value: OperationProgress) => void): Promise<{ bytes: number }> {
+  const parallel = await tryParallelDownload(client, params, key, signal, callback);
+  if (parallel && 'bytes' in parallel) return parallel;
   const localPath = params.localPath!;
+  const resumeId = params.resumeId;
+  const temp = resumeId ? resumeNames(resumeId).part : `.s3client-${randomUUID()}.part`;
   let parent: FileHandle;
   try { parent = await openDirectoryAnchor(params.rootPath ?? dirname(localPath), dirname(localPath)); }
   catch { throw error('LOCAL_PATH_UNSAFE', safeLocalIOMessage); }
-  const temp = `.s3client-${randomUUID()}.part`;
   const tempPath = descriptorPath(parent, temp);
   const destPath = descriptorPath(parent, basename(localPath));
   let output: FileHandle | undefined;
   let body: { destroy?: () => void } | undefined;
+  let keepPartial = false;
   try {
     check(signal);
-    let response;
-    try { response = await client.send(new GetObjectCommand({ Bucket: params.connection.bucket, Key: key }), { abortSignal: signal }); }
-    catch (cause) { throw sdk(cause, 'download'); }
-    const total = response.ContentLength;
-    if (!safeCount(total) || !response.Body) throw error('INVALID_RESPONSE', 'The S3 service returned an invalid download response.');
-    body = response.Body as typeof body;
-    const emit = progress(callback, total);
-    try { output = await open(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600); }
-    catch { throw error('LOCAL_PATH_UNSAFE', 'Could not create a temporary file in the selected download directory.'); }
-    emit(0);
+    const identity = { endpoint: params.connection.endpoint, bucket: params.connection.bucket, key };
+    let resume = resumeId ? await readResume(parent, resumeId, identity) : null;
+    keepPartial = resume !== null;
+    let response: GetObjectCommandOutput | undefined;
+    let total = 0;
     let transferred = 0;
+    let alreadyComplete = false;
+    let resumeNote: string | undefined = parallel?.fallbackNote;
+    if (resume && resume.bytes > 0) {
+      try {
+        if (resume.bytes === resume.record.total) {
+          const head = await client.send(new HeadObjectCommand({ Bucket: identity.bucket, Key: key, IfMatch: resume.record.etag }), { abortSignal: signal });
+          alreadyComplete = head.ETag === resume.record.etag && head.ContentLength === resume.record.total;
+          if (!alreadyComplete) resumeNote = 'The S3 object changed; this download restarted from the beginning.';
+        } else {
+          const ranged = await client.send(new GetObjectCommand({ Bucket: identity.bucket, Key: key, Range: `bytes=${resume.bytes}-`, IfMatch: resume.record.etag }), { abortSignal: signal });
+          const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(ranged.ContentRange ?? '');
+          if (ranged.$metadata.httpStatusCode === 206 && range && Number(range[1]) === resume.bytes && Number(range[2]) === resume.record.total - 1 && Number(range[3]) === resume.record.total && ranged.ContentLength === resume.record.total - resume.bytes && ranged.ETag === resume.record.etag && ranged.Body) response = ranged;
+          else {
+            (ranged.Body as { destroy?: () => void } | undefined)?.destroy?.();
+            resumeNote = ranged.ETag && ranged.ETag !== resume.record.etag ? 'The S3 object changed; this download restarted from the beginning.' : 'Range requests are not supported by this service; this download restarted from the beginning.';
+          }
+        }
+      } catch (cause) {
+        if (signal.aborted) check(signal);
+        const status = (cause as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+        if (status === 412) resumeNote = 'The S3 object changed; this download restarted from the beginning.';
+        else if ([400, 405, 416, 501].includes(status ?? 0)) resumeNote = 'Range requests are not supported or were rejected by this service; this download restarted from the beginning.';
+        else throw sdk(cause, 'download');
+      }
+      if (!response && !alreadyComplete) { await discardResume(parent, resumeId!); keepPartial = false; resume = null; }
+    } else if (resume) { await discardResume(parent, resumeId!); keepPartial = false; resume = null; }
+    if (resume) {
+      try { output = await open(tempPath, constants.O_WRONLY | constants.O_NOFOLLOW); }
+      catch { throw error('LOCAL_PATH_UNSAFE', 'Could not reopen the partial download safely.'); }
+      const current = await output.stat();
+      if (!current.isFile() || current.size !== resume.bytes || current.dev !== resume.device || current.ino !== resume.inode) throw error('LOCAL_PATH_UNSAFE', 'The partial download changed on disk. Remove the task and download it again.');
+      total = resume.record.total;
+      transferred = resume.bytes;
+      keepPartial = true;
+    } else {
+      let fresh: GetObjectCommandOutput;
+      try { fresh = await client.send(new GetObjectCommand({ Bucket: identity.bucket, Key: key }), { abortSignal: signal }); }
+      catch (cause) { throw sdk(cause, 'download'); }
+      if (!safeCount(fresh.ContentLength) || !fresh.Body) throw error('INVALID_RESPONSE', 'The S3 service returned an invalid download response.');
+      response = fresh;
+      total = fresh.ContentLength;
+      try { output = await open(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600); }
+      catch { throw error('LOCAL_PATH_UNSAFE', 'Could not create a temporary file in the selected download directory.'); }
+      if (resumeId && fresh.ETag) {
+        await writeResume(parent, resumeId, { ...identity, etag: fresh.ETag, total });
+        keepPartial = true;
+      } else if (resumeId) resumeNote ??= 'This service did not provide an ETag; a failed download will restart from the beginning.';
+    }
+    const emit = progress(callback, total);
+    emit(transferred, false, transferred, resumeNote);
+    body = response?.Body as typeof body;
     try {
-      for await (const part of response.Body as AsyncIterable<Uint8Array>) {
+      for await (const part of alreadyComplete ? [] : response!.Body as AsyncIterable<Uint8Array>) {
         check(signal);
         const chunk = Buffer.from(part);
         let offset = 0;
-        while (offset < chunk.length) { const write = await output.write(chunk, offset, chunk.length - offset); offset += write.bytesWritten; }
+        while (offset < chunk.length) { const write = await output!.write(chunk, offset, chunk.length - offset, transferred + offset); offset += write.bytesWritten; }
         transferred += chunk.length;
         if (transferred > total) throw error('INCOMPLETE_DOWNLOAD', 'The download was incomplete. Retry the file.');
         emit(transferred);
@@ -153,20 +205,26 @@ async function download(client: S3Client, params: OperationParams, key: string, 
       if (await missingOnProbe(client, params.connection, key, signal)) throw error('OBJECT_MISSING', 'The S3 object no longer exists. It may have been deleted. Refresh the folder before retrying this download.');
       throw error('INCOMPLETE_DOWNLOAD', 'The download was incomplete. Retry the file.');
     }
-    await output.sync(); await output.close(); output = undefined;
+    await output!.sync(); await output!.close(); output = undefined;
     check(signal);
     try { await link(tempPath, destPath); }
     catch (cause) {
       if ((cause as NodeJS.ErrnoException).code === 'EEXIST') throw error('LOCAL_PATH_UNSAFE', 'A file already exists at the download destination. Choose a new destination.');
       throw error('LOCAL_PATH_UNSAFE', 'Could not save the download in the selected directory.');
     }
-    await unlink(tempPath);
+    if (resumeId) await discardResume(parent, resumeId);
+    else await unlink(tempPath);
+    keepPartial = false;
     emit(transferred, true);
     return { bytes: transferred };
   } finally {
     body?.destroy?.();
+    if (keepPartial) await output?.sync().catch(() => undefined);
     await output?.close().catch(() => undefined);
-    await unlink(tempPath).catch(() => undefined);
+    if (!keepPartial) {
+      if (resumeId) await discardResume(parent, resumeId).catch(() => undefined);
+      else await unlink(tempPath).catch(() => undefined);
+    }
     await parent.close();
   }
 }

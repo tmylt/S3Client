@@ -38,6 +38,7 @@ let profile: string;
 let app: ElectronApplication | undefined;
 let requests = 0;
 let throttleLargeDownloads = false;
+let largeDownloadRanges: Array<string | null> = [];
 let errors: string[];
 
 function isolatedEnvironment() {
@@ -66,6 +67,7 @@ test.beforeAll(async () => {
   // independently of machine speed, without mocking the app's S3 APIs.
   proxy = createServer((incoming, outgoing) => {
     requests++;
+    if (incoming.method === 'GET' && ['/large.bin', '/parallel.bin'].some(suffix => incoming.url?.split('?')[0].endsWith(suffix))) largeDownloadRanges.push(typeof incoming.headers.range === 'string' ? incoming.headers.range : null);
     if (ignoredDeleteKey && incoming.method === 'DELETE' && decodeURIComponent(new URL(incoming.url || '/', directEndpoint).pathname) === `/${bucket}/${ignoredDeleteKey}`) {
       incoming.resume();
       outgoing.writeHead(204); outgoing.end();
@@ -151,6 +153,7 @@ test.beforeEach(async () => {
   profile = join(directory, 'profile');
   await mkdir(profile, { recursive: true });
   errors = [];
+  largeDownloadRanges = [];
 });
 
 test.afterEach(async () => {
@@ -431,14 +434,15 @@ for (const packaged of [false, true]) test(`bulk downloads and deletes a checked
   expect(await remoteKeys('workspace/collection-neighbor/')).toEqual(['workspace/collection-neighbor/keep.txt']);
 });
 
-test('active byte progress, individual stop/resume/cancel and cancel all clean partials', async () => {
+for (const packaged of [false, true]) test(`active byte progress, individual stop/resume/cancel and cancel all clean partials (${packaged ? 'packaged' : 'source'})`, async () => {
+  if (packaged) test.skip(!existsSync(packagedExecutable), 'Build the packaged application first.');
   throttleLargeDownloads = true;
-  const page = await launch();
+  let page = await launch(packaged);
   await connect(page, 'active/');
   const downloads = join(directory, 'downloads');
   await mkdir(downloads);
   await choose([downloads]);
-  const table = page.getByRole('table', { name: 'Folder contents' });
+  let table = page.getByRole('table', { name: 'Folder contents' });
   await table.getByRole('button', { name: 'Download keep.txt', exact: true }).click();
   await state(page, 'keep.txt', 'Completed');
   await closePanel(page);
@@ -457,12 +461,33 @@ test('active byte progress, individual stop/resume/cancel and cancel all clean p
   await task(page, 'large.bin').getByRole('button', { name: 'Stop large.bin', exact: true }).click();
   await state(page, 'large.bin', 'Stopped');
   await expect(task(page, 'large.bin').locator('.transfer-speed')).toHaveCount(0);
-  await expect.poll(() => readdir(downloads)).toEqual(['keep.txt']);
-  await task(page, 'large.bin').getByRole('button', { name: 'Start large.bin', exact: true }).click();
-  await expect.poll(progressing, { timeout: 30_000 }).toBe(true);
-  await task(page, 'large.bin').getByRole('button', { name: 'Cancel large.bin', exact: true }).click();
-  await state(page, 'large.bin', 'Cancelled');
-  await expect.poll(() => readdir(downloads)).toEqual(['keep.txt']);
+  const partialName = (await readdir(downloads)).find(name => name.endsWith('.part'))!;
+  const partialBytes = (await stat(join(downloads, partialName))).size;
+  expect(partialBytes).toBeGreaterThan(0);
+  await app!.close(); app = undefined;
+  page = await launch(packaged);
+  await page.evaluate(async () => {
+    const connection = (await window.s3.connections()).connections[0];
+    await window.s3.saveConnection({ ...connection, accessKey: 'transfer-test-access', secretKey: 'transfer-test-secret' });
+  });
+  await openPanel(page, 'Downloads');
+  table = page.getByRole('table', { name: 'Folder contents' });
+  expect((await snapshot(page)).tasks.find(item => item.relativePath === 'large.bin')).toMatchObject({ status: 'paused' });
+  expect((await stat(join(downloads, partialName))).size).toBe(partialBytes);
+  await task(page, 'large.bin').getByRole('button', { name: 'Resume large.bin', exact: true }).click();
+  await state(page, 'large.bin', 'Completed');
+  expect(largeDownloadRanges).toContain(`bytes=${partialBytes}-`);
+  expect(await readFile(join(downloads, 'large.bin'))).toEqual(initialObjects.find(([key]) => key === 'active/large.bin')![1]);
+  await expect.poll(async () => (await readdir(downloads)).sort()).toEqual(['keep.txt', 'large.bin']);
+  await closePanel(page);
+  await choose([downloads]);
+  await table.getByRole('button', { name: 'Download large.bin', exact: true }).click();
+  await expect.poll(async () => (await snapshot(page)).tasks.filter(item => item.key === 'active/large.bin').length).toBe(2);
+  const second = (await snapshot(page)).tasks.filter(item => item.key === 'active/large.bin').at(-1)!;
+  await expect.poll(async () => (await stat(join(downloads, `.s3client-${second.id}.part`)).catch(() => null))?.size ?? 0, { timeout: 30_000 }).toBeGreaterThan(0);
+  await task(page, second.relativePath).getByRole('button', { name: `Cancel ${second.relativePath}`, exact: true }).click();
+  await state(page, second.relativePath, 'Cancelled');
+  await expect.poll(async () => (await readdir(downloads)).sort()).toEqual(['keep.txt', 'large.bin']);
   expect(await readFile(join(downloads, 'keep.txt'))).toEqual(Buffer.from('completed files survive cancellation'));
   await page.getByRole('button', { name: 'Stop all', exact: true }).click();
   for (const name of ['queued-one.txt', 'queued-two.txt']) {
@@ -474,7 +499,24 @@ test('active byte progress, individual stop/resume/cancel and cancel all clean p
   await state(page, 'queued-one.txt', 'Cancelled');
   await state(page, 'queued-two.txt', 'Cancelled');
   await state(page, 'keep.txt', 'Completed');
-  expect(await readdir(downloads)).toEqual(['keep.txt']);
+  expect((await readdir(downloads)).sort()).toEqual(['keep.txt', 'large.bin']);
+});
+
+for (const packaged of [false, true]) test(`large file uses parallel ranges in the download queue (${packaged ? 'packaged' : 'source'})`, async () => {
+  if (packaged) test.skip(!existsSync(packagedExecutable), 'Build the packaged application first.');
+  const bytes = Buffer.alloc(32 * 1024 * 1024, 81);
+  await service!.put('parallel/parallel.bin', bytes);
+  const page = await launch(packaged);
+  await connect(page, 'parallel/');
+  const downloads = join(directory, 'downloads');
+  await mkdir(downloads);
+  await choose([downloads]);
+  const table = page.getByRole('table', { name: 'Folder contents' });
+  await table.getByRole('button', { name: 'Download parallel.bin', exact: true }).click();
+  await state(page, 'parallel.bin', 'Completed');
+  expect(largeDownloadRanges.filter((value): value is string => value !== null).sort()).toEqual(Array.from({ length: 4 }, (_, index) => `bytes=${index * 8 * 1024 * 1024}-${(index + 1) * 8 * 1024 * 1024 - 1}`).sort());
+  expect((await readFile(join(downloads, 'parallel.bin'))).equals(bytes)).toBe(true);
+  expect(await readdir(downloads)).toEqual(['parallel.bin']);
 });
 
 test('packaged desktop runs transfers and styled file/folder delete confirmations', async () => {

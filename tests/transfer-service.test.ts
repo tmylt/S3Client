@@ -20,6 +20,14 @@ async function setup(run: (...args: any[]) => any) {
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(services.splice(0).map(service => service.dispose())); await Promise.all(paths.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
 describe('transfer service', () => {
+  it('passes a known file size to the download worker', async () => {
+    const run = vi.fn(() => ({ cancel: vi.fn(), promise: Promise.resolve({ bytes: 19 }) }));
+    const { service, saved, destination } = await setup(run);
+    await service.startDownload(saved.id, 'root/small.txt', 'file', destination, undefined, 19);
+    await vi.waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run).toHaveBeenCalledWith('download', expect.objectContaining({ key: 'root/small.txt', sizeHint: 19 }), expect.any(Function));
+  });
+
   it('shows a deleted S3 object as a failed download task', async () => {
     const missing = new OperationError('OBJECT_MISSING', 'The S3 object no longer exists. It may have been deleted. Refresh the folder before retrying this download.');
     const { service, saved, destination } = await setup(() => ({ cancel: vi.fn(), promise: Promise.reject(missing) }));

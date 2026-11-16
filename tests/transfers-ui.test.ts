@@ -168,7 +168,7 @@ describe('bulk file actions', () => {
     expect(within(table).getByRole('checkbox', { name: 'Select all on this page' })).toHaveProperty('checked', true);
     fireEvent.click(screen.getByRole('button', { name: 'Download 2 selected' }));
     await screen.findByRole('dialog', { name: 'Downloads' });
-    expect(bridge.downloadEntries).toHaveBeenCalledExactlyOnceWith('a', [{ key: 'folder/', kind: 'folder' }, { key: 'report.txt', kind: 'file' }]);
+    expect(bridge.downloadEntries).toHaveBeenCalledExactlyOnceWith('a', [{ key: 'folder/', kind: 'folder' }, { key: 'report.txt', kind: 'file', size: 100 }]);
     expect(bridge.download).not.toHaveBeenCalled();
   });
 

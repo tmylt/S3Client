@@ -67,7 +67,8 @@ function registerIPC(store: ConnectionStore, worker: S3Worker, operations: Opera
   handle('s3:connection-details', id => store.connectionDetails(id));
   handle('s3:save-connection', async input => {
     const id = input && typeof input === 'object' && 'id' in input ? input.id : undefined;
-    const saved = typeof id === 'string' ? await service.withConnectionMutation(id, () => listings.save(input)) : await listings.save(input);
+    const reconnected = typeof id === 'string' ? await store.reconnectIfUnchanged(input) : null;
+    const saved = reconnected ?? (typeof id === 'string' ? await service.withConnectionMutation(id, () => listings.save(input)) : await listings.save(input));
     if (typeof id === 'string') video.closeConnection(id);
     return saved;
   });
@@ -110,13 +111,14 @@ function registerIPC(store: ConnectionStore, worker: S3Worker, operations: Opera
     return listings.clearStatsHistory(id, target);
   });
   const entryKind = (kind: unknown): 'file' | 'folder' => { if (kind !== 'file' && kind !== 'folder') throw new Error('Invalid entry type.'); return kind; };
-  handle('s3:download', async (id, key, value) => {
+  handle('s3:download', async (id, key, value, size) => {
     const kind = entryKind(value);
+    const sizeHint = typeof size === 'number' && Number.isSafeInteger(size) && size >= 0 ? size : undefined;
     const admission = service.captureAdmission(id, 'download');
     await store.forOperation(id, key, 'download', kind);
     const result = await dialog.showOpenDialog(window!, { title: 'Choose download destination', buttonLabel: 'Save here', properties: ['openDirectory', 'createDirectory'] });
     if (result.canceled || !result.filePaths.length) return null;
-    return service.startDownload(id, key, kind, result.filePaths[0], admission);
+    return service.startDownload(id, key, kind, result.filePaths[0], admission, sizeHint);
   });
   handle('s3:download-entries', async (id, value) => {
     const entries = validateEntryTargets(value);
@@ -126,7 +128,7 @@ function registerIPC(store: ConnectionStore, worker: S3Worker, operations: Opera
     if (result.canceled || !result.filePaths.length) return null;
     const summary = { succeeded: 0, failed: [] as { key: string; message: string }[] };
     for (const entry of entries) {
-      try { await service.startDownload(id, entry.key, entry.kind, result.filePaths[0], admission); summary.succeeded++; }
+      try { await service.startDownload(id, entry.key, entry.kind, result.filePaths[0], admission, entry.size); summary.succeeded++; }
       catch (error) { summary.failed.push({ key: entry.key, message: error instanceof Error ? error.message : 'Could not queue this download.' }); }
     }
     return summary;

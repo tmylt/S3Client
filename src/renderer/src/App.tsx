@@ -174,7 +174,9 @@ export default function App() {
     setBusyEntries(current => new Set([...current, operationKey]));
     try {
       if (action === 'download') {
-        const groupId = await window.s3.download(connection.id, entry.key, entry.kind);
+        const groupId = entry.kind === 'file' && entry.size !== null
+          ? await window.s3.download(connection.id, entry.key, entry.kind, entry.size)
+          : await window.s3.download(connection.id, entry.key, entry.kind);
         if (groupId !== null) setTransferDirection('download');
       } else if (await window.s3.deleteEntry(connection.id, entry.key, entry.kind)) {
         notify(`${entry.name || 'Item'} deleted`);
@@ -194,7 +196,7 @@ export default function App() {
   const toggleAllChecked = () => setCheckedKeys(checkedEntries.length === visible.length ? new Set() : new Set(visible.map(entry => entry.key)));
   const bulkAction = async (action: 'download' | 'delete') => {
     if (!connection || !checkedEntries.length || bulkBusy) return;
-    const targets = checkedEntries.map(entry => ({ key: entry.key, kind: entry.kind }));
+    const targets = checkedEntries.map(entry => ({ key: entry.key, kind: entry.kind, ...(action === 'download' && entry.kind === 'file' && entry.size !== null ? { size: entry.size } : {}) }));
     const operationKeys = targets.map(entry => nodeKey(connection.id, entry.key));
     if (operationKeys.some(key => operations.current.has(key))) return;
     operationKeys.forEach(key => operations.current.add(key));

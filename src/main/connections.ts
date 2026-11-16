@@ -184,6 +184,29 @@ export class ConnectionStore {
     });
   }
 
+  /** Restores credentials after restart without cancelling stopped transfers when all settings are unchanged. */
+  reconnectIfUnchanged(value: unknown): Promise<Connection | null> {
+    return this.serial(async () => {
+      if (!value || typeof value !== 'object') return null;
+      const input = value as ConnectionInput;
+      if (typeof input.id !== 'string' || typeof input.accessKey !== 'string' || !input.accessKey || typeof input.secretKey !== 'string' || !input.secretKey) return null;
+      const previous = this.records.find(record => record.id === input.id);
+      if (!previous || this.credentials.has(input.id)) return null;
+      if (JSON.stringify(normalizeConnection(value)) !== JSON.stringify(normalizeConnection(previous))) return null;
+      const credentials = parseCredentials(input);
+      const record = { ...previous };
+      if (await this.available()) {
+        try { record.encryptedCredentials = (await this.storage.encrypt(JSON.stringify(credentials))).toString('base64'); }
+        catch { throw new Error('Secure credential encryption failed. The connection was not saved.'); }
+        await this.persist(this.records.map(item => item.id === input.id ? record : item));
+        this.records = this.records.map(item => item.id === input.id ? record : item);
+      }
+      this.credentials.set(input.id, credentials);
+      this.locked.delete(input.id);
+      return this.public(record);
+    });
+  }
+
   save(value: unknown): Promise<Connection> {
     return this.serial(async () => {
       const settings = normalizeConnection(value);

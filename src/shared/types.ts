@@ -61,7 +61,7 @@ export interface Entry {
   storageClass?: string;
   stats?: FolderStats;
 }
-export interface EntryTarget { key: string; kind: 'folder' | 'file' }
+export interface EntryTarget { key: string; kind: 'folder' | 'file'; size?: number }
 export interface BatchEntryResult { succeeded: number; failed: { key: string; message: string }[] }
 
 export interface Listing { entries: Entry[]; nextToken?: string | null }
@@ -109,7 +109,7 @@ export interface S3API {
   deleteStatsHistoryPoint(connectionId: string, prefix: string, point: FolderStats): Promise<FolderStats[] | null>;
   clearStatsHistory(connectionId: string, prefix: string): Promise<FolderStats[] | null>;
   copyText(text: string): Promise<void>;
-  download(connectionId: string, key: string, kind: 'file' | 'folder'): Promise<string | null>;
+  download(connectionId: string, key: string, kind: 'file' | 'folder', size?: number): Promise<string | null>;
   downloadEntries(connectionId: string, entries: EntryTarget[]): Promise<BatchEntryResult | null>;
   uploadSources(connectionId: string, prefix: string, directory?: string): Promise<UploadSources>;
   upload(connectionId: string, prefix: string, paths: string[]): Promise<string | null>;

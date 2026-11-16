@@ -377,6 +377,17 @@ describe('ConnectionStore', () => {
     expect((await reloaded.connections()).connections[0].hasCredentials).toBe(false);
     await expect(reloaded.forListing(saved.id, 'team/')).rejects.toThrow(/reconnect|re-enter/i);
   });
+  it('reconnects credentials without changing connection settings or cancelling resumable work', async () => {
+    const path = await directory();
+    const unavailable: SecretStorage = { ...secure(), isAvailable: async () => false };
+    const store = new ConnectionStore(path, unavailable);
+    const saved = await store.save(input);
+    const reloaded = new ConnectionStore(path, unavailable);
+    expect(await reloaded.reconnectIfUnchanged({ ...input, id: saved.id, endpoint: 'http://localhost:9001' })).toBeNull();
+    expect(await reloaded.reconnectIfUnchanged({ ...input, id: saved.id })).toMatchObject({ id: saved.id, hasCredentials: true });
+    expect((await reloaded.forListing(saved.id, 'team/')).connection.secretKey).toBe(input.secretKey);
+    expect(await readFile(join(path, 'connections.json'), 'utf8')).not.toContain('TOP_SECRET');
+  });
   it('preserves credentials when editing with blank keys and removes connections durably', async () => {
     const path = await directory();
     const store = new ConnectionStore(path, secure());

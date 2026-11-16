@@ -1,0 +1,9 @@
+# Parallel ranged downloads
+
+For new downloads of files at least 32 MiB, use four concurrent S3 `GetObject` requests for disjoint 8 MiB ranges. A `HeadObject` request obtains the size and ETag. A known positive size below the threshold bypasses HEAD negotiation; zero is an unknown size for directly queued files. The first ranged response must prove that the service supports `Range` before opening the other requests. Each response must have status 206, the exact `Content-Range` and `Content-Length`, and the expected ETag. Files smaller than 32 MiB and endpoints without usable range support use the existing single-stream path.
+
+The worker writes into one private `.part` file at absolute offsets. A version 2 `.resume` sidecar stores the endpoint, bucket, key, ETag, total size, chunk size, and a bitmap of completed chunks. A chunk becomes complete only after its bytes are written and synced and the bitmap is atomically saved. On stop, failure, or application shutdown, completed chunks remain; the next attempt fetches only incomplete chunks. Existing version 1 sequential partials continue through the current resume path.
+
+When a service ignores or rejects `Range`, or when the object changes, stop the ranged workers, discard the version 2 partial, and restart through the single-stream path. For a transient failure, retain completed chunks and fail the task for user retry. Cancellation or row removal removes both files. Progress counts completed chunks so restored progress never claims unsaved bytes. The existing one-to-eight task concurrency remains separate from the four HTTP requests used inside one large-file task.
+
+Tests use a local HTTP S3 fixture. They verify disjoint concurrent ranges and final bytes, stopped/restarted task recovery, ignored range and changed ETag fallback, transient failure retention, and cancellation cleanup. Electron tests run hidden.

@@ -3,7 +3,7 @@ import { mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import { emptyTransferSnapshot, type NewTransferTask, type TransferAction, type TransferDirection, type TransferSnapshot, type TransferTask } from '../shared/transfers';
 
-export type TransferExecutor = (task: TransferTask, progress: (value: { transferred: number; total: number }) => void, signal: AbortSignal) => Promise<{ bytes: number }>;
+export type TransferExecutor = (task: TransferTask, progress: (value: { transferred: number; total: number; resumeOffset?: number; resumeNote?: string }) => void, signal: AbortSignal) => Promise<{ bytes: number }>;
 const maxBytes = 32 * 1024 * 1024;
 const maxTasks = 100_000;
 const pending = (task: TransferTask) => ['queued', 'running', 'paused'].includes(task.status);
@@ -29,6 +29,7 @@ function cleanTask(value: unknown): TransferTask {
   if (!Number.isFinite(Date.parse(raw.createdAt))) throw new Error('Invalid transfer date.');
   return { ...output, direction: raw.direction, isDirectory: raw.isDirectory, status: raw.status, size: raw.size, transferred: raw.transferred,
     ...(typeof raw.error === 'string' ? { error: raw.error.slice(0, 1000) } : {}),
+    ...(typeof raw.resumeNote === 'string' ? { resumeNote: raw.resumeNote.slice(0, 500) } : {}),
     ...(typeof raw.finishedAt === 'string' && Number.isFinite(Date.parse(raw.finishedAt)) ? { finishedAt: raw.finishedAt } : {}),
   };
 }
@@ -36,7 +37,7 @@ function cleanTask(value: unknown): TransferTask {
 /** Owns scheduling and metadata; it never stores or resolves credentials. */
 export class TransferQueue {
   private state = emptyTransferSnapshot();
-  private readonly active = new Map<string, { controller: AbortController; startedAt: number; done?: Promise<void> }>();
+  private readonly active = new Map<string, { controller: AbortController; startedAt: number; startedBytes: number; done?: Promise<void> }>();
   private readonly removing = new Set<string>();
   private readonly ready: Promise<void>;
   private writes: Promise<unknown> = Promise.resolve();
@@ -45,7 +46,7 @@ export class TransferQueue {
   private speedTimer?: ReturnType<typeof setInterval>;
   private readonly file: string;
 
-  constructor(private readonly directory: string, private readonly execute: TransferExecutor, private readonly changed: (snapshot: TransferSnapshot, reason?: 'history') => void = () => {}) {
+  constructor(private readonly directory: string, private readonly execute: TransferExecutor, private readonly changed: (snapshot: TransferSnapshot, reason?: 'history') => void = () => {}, private readonly discard: (task: TransferTask) => Promise<void> = async () => {}) {
     this.file = join(directory, 'transfer-queue.json');
     this.ready = this.load();
   }
@@ -57,7 +58,7 @@ export class TransferQueue {
       tasks: this.state.tasks.map(task => {
         const active = this.active.get(task.id);
         const elapsed = active ? now - active.startedAt : 0;
-        const bytesPerSecond = task.status === 'running' && !task.isDirectory && elapsed > 0 ? Math.round(task.transferred * 1000 / elapsed) : 0;
+        const bytesPerSecond = task.status === 'running' && !task.isDirectory && elapsed > 0 ? Math.round(Math.max(0, task.transferred - (active?.startedBytes ?? 0)) * 1000 / elapsed) : 0;
         return { ...task, bytesPerSecond };
       }),
       preparations: [], paused: { ...this.state.paused }, concurrency: { ...this.state.concurrency },
@@ -83,7 +84,7 @@ export class TransferQueue {
           const task = cleanTask(value);
           if (ids.has(task.id)) continue;
           ids.add(task.id);
-          if (pending(task)) { task.status = 'paused'; task.transferred = 0; delete task.error; }
+          if (pending(task)) { task.status = 'paused'; if (task.direction === 'upload') task.transferred = 0; delete task.error; }
           tasks.push(task);
         } catch { /* A damaged row must not prevent restoring other tasks. */ }
       }
@@ -137,8 +138,8 @@ export class TransferQueue {
       for (const task of this.state.tasks) {
         if (running >= this.state.concurrency[direction]) break;
         if (task.direction !== direction || task.status !== 'queued' || this.active.has(task.id)) continue;
-        task.status = 'running'; task.transferred = 0; delete task.error; delete task.finishedAt;
-        const entry = { controller: new AbortController(), startedAt: performance.now(), done: undefined as Promise<void> | undefined };
+        task.status = 'running'; if (task.direction === 'upload') task.transferred = 0; delete task.error; delete task.resumeNote; delete task.finishedAt;
+        const entry = { controller: new AbortController(), startedAt: performance.now(), startedBytes: task.transferred, done: undefined as Promise<void> | undefined };
         this.active.set(task.id, entry); running++;
         entry.done = this.run(task, entry.controller);
       }
@@ -156,7 +157,13 @@ export class TransferQueue {
       const result = await this.execute({ ...task }, progress => {
         if (controller.signal.aborted || task.status !== 'running') return;
         if (![progress.transferred, progress.total].every(number => Number.isSafeInteger(number) && number >= 0) || progress.transferred > progress.total) return;
+        if (progress.resumeOffset !== undefined) {
+          if (!Number.isSafeInteger(progress.resumeOffset) || progress.resumeOffset < 0 || progress.resumeOffset > progress.total) return;
+          const active = this.active.get(task.id);
+          if (active) { active.startedBytes = progress.resumeOffset; active.startedAt = performance.now(); }
+        }
         task.size = progress.total; task.transferred = progress.transferred;
+        if (progress.resumeNote) task.resumeNote = progress.resumeNote.slice(0, 500);
         if (!this.progressTimer) this.progressTimer = setTimeout(() => { this.progressTimer = undefined; this.checkpoint(); }, 250);
       }, controller.signal);
       if (controller.signal.aborted || task.status !== 'running') return;
@@ -174,9 +181,9 @@ export class TransferQueue {
     const cleanup: Promise<unknown>[] = [];
     for (const task of tasks) {
       if (action === 'start') {
-        if (task.status === 'paused' || task.status === 'failed') { task.status = 'queued'; task.transferred = 0; delete task.error; delete task.finishedAt; }
+        if (task.status === 'paused' || task.status === 'failed') { task.status = 'queued'; if (task.direction === 'upload') task.transferred = 0; delete task.error; delete task.finishedAt; }
       } else if (pending(task) || (action === 'cancel' && task.status === 'failed')) {
-        task.status = action === 'stop' ? 'paused' : 'cancelled'; task.transferred = 0; delete task.error;
+        task.status = action === 'stop' ? 'paused' : 'cancelled'; if (action === 'cancel' || task.direction === 'upload') task.transferred = 0; delete task.error;
         if (action === 'cancel') task.finishedAt = new Date().toISOString();
         const entry = this.active.get(task.id); entry?.controller.abort();
         if (entry?.done) cleanup.push(entry.done);
@@ -194,20 +201,25 @@ export class TransferQueue {
     if (action === 'start') this.state.paused[task.direction] = false;
     const cleanup = this.change([task], action); this.checkpoint(); this.pump();
     await Promise.allSettled(cleanup);
+    if (action === 'cancel') await this.discard(task);
   }
 
   async controlAll(direction: unknown, action: unknown): Promise<void> {
     await this.ready;
     if (!validDirection(direction) || !validAction(action)) throw new Error('Invalid transfer control.');
     this.state.paused[direction] = action === 'stop';
-    const cleanup = this.change(this.state.tasks.filter(task => task.direction === direction && !this.removing.has(task.id)), action); this.checkpoint(); this.pump();
+    const tasks = this.state.tasks.filter(task => task.direction === direction && !this.removing.has(task.id));
+    const cleanup = this.change(tasks, action); this.checkpoint(); this.pump();
     await Promise.allSettled(cleanup);
+    if (action === 'cancel') await Promise.all(tasks.map(task => this.discard(task)));
   }
 
   async cancelMatching(predicate: (task: TransferTask) => boolean): Promise<void> {
     await this.ready;
-    const cleanup = this.change(this.state.tasks.filter(predicate), 'cancel'); this.checkpoint(); this.pump();
+    const tasks = this.state.tasks.filter(predicate);
+    const cleanup = this.change(tasks, 'cancel'); this.checkpoint(); this.pump();
     await Promise.allSettled(cleanup);
+    await Promise.all(tasks.map(task => this.discard(task)));
   }
 
   async remove(id: unknown): Promise<void> {
@@ -236,6 +248,7 @@ export class TransferQueue {
     this.change(tasks, 'cancel'); this.checkpoint(); this.pump();
     try {
       await Promise.allSettled(cleanup);
+      await Promise.all(tasks.map(task => this.discard(task)));
       this.state.tasks = this.state.tasks.filter(task => !ids.has(task.id));
       await this.persist();
     } finally {

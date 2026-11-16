@@ -135,9 +135,11 @@ The **Downloads** and **Uploads** buttons in the header open separate task lists
 
 ![Download task list showing progress, speed, and task controls](docs/images/downloads.png)
 
-**Stop** pauses unfinished work. **Start** retries an incomplete file from the beginning. **Cancel** removes an unfinished download's partial file and keeps completed files. Use the trash icon on a task row to remove it from the list. **Clear all** asks whether to keep unfinished tasks while removing finished rows, or cancel everything and remove every row. Removing a row does not delete an already completed local file or S3 object.
+For a file of at least 32 MiB, the app automatically downloads up to four 8 MiB ranges at once when the service supports Range and supplies an ETag. This can improve speed on a connection where one request does not use the available bandwidth. The **Concurrent downloads** control counts files, while each eligible file may use four HTTP requests. Each finished range is saved for resume after a stop, failure, or app restart. Smaller files, older partial downloads, and services without usable Range support use one request at a time.
 
-Unfinished tasks return as **Stopped** after an app restart. They do not contact S3 until you start them. Changing or removing a connection cancels its unfinished tasks.
+**Stop** pauses unfinished work. A stopped or failed download keeps its private partial file; click **Resume** to request only the remaining bytes when the S3 service supports Range and provides an ETag. The app checks the ETag and returned byte range before appending. If the object changed or the service ignores Range, it starts that file from the beginning and explains why in the task row. Services without an ETag cannot safely resume, so their downloads restart from zero. Uploads still restart from the beginning. **Cancel** removes an unfinished download's partial file and keeps completed files. Use the trash icon on a task row to remove it from the list. **Clear all** asks whether to keep unfinished tasks while removing finished rows, or cancel everything and remove every row. Removing a row does not delete an already completed local file or S3 object.
+
+Unfinished tasks return as **Stopped** after an app restart, and resumable partial files remain in the selected destination. They do not contact S3 until you start them. If your operating system cannot securely store connection credentials, reopen **Edit connection** and re-enter both keys first; restoring credentials without changing connection settings keeps stopped downloads. Changing other connection settings or removing a connection cancels its unfinished tasks.
 
 ## Play an MP4
 

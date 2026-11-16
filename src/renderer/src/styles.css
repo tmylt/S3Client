@@ -405,6 +405,7 @@ fieldset { padding: 0; border: 0; margin: 0; min-width: 0; }
 .transfer-status.failed, .transfer-error { color: #b56e66; }
 .transfer-status.completed { color: #63a184; }
 .transfer-connection, .transfer-local-path, .transfer-error { font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; margin: 6px 0 0; }
+.transfer-resume-note { margin: 6px 0 0; color: #687b9a; font-size: 10px; line-height: 1.6; }
 .transfer-connection { color: #8e9aac; }
 .transfer-local-path { color: #6f7e93; }
 .transfer-local-path > span { color: #9ca5b2; margin-right: 5px; }

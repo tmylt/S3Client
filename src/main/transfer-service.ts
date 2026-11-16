@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import type { ConnectionStore } from './connections';
 import { OperationError, type OperationHandle, type OperationRunner } from './operation-runner';
+import { discardDownloadPartial } from './download-resume';
 import { validateUploadSelection } from './upload-sources';
 import { TransferQueue, type TransferExecutor } from './transfer-queue';
 import { allocateDownloadRoot, downloadPlan, ensureDownloadPath, safeSegments, uploadPlan, validateUploadPath, type PlannedPath } from './transfer-paths';
@@ -38,7 +39,9 @@ export class TransferService {
   private disposed = false;
 
   constructor(private readonly store: ConnectionStore, private readonly runner: Pick<OperationRunner, 'run'>, directory: string, private readonly callbacks: Callbacks = {}) {
-    this.queue = new TransferQueue(directory, this.execute, (snapshot, reason) => { this.emit(snapshot); this.notifyCompletedGroups(snapshot, reason !== 'history'); });
+    this.queue = new TransferQueue(directory, this.execute, (snapshot, reason) => { this.emit(snapshot); this.notifyCompletedGroups(snapshot, reason !== 'history'); }, async task => {
+      if (task.direction === 'download' && !task.isDirectory) await discardDownloadPartial(task.rootPath, task.localPath, task.id);
+    });
     this.ready = this.queue.initialize().then(() => {
       const snapshot = this.queue.snapshot();
       for (const task of snapshot.tasks) if (unfinished(task) && task.direction === 'download') this.reservations.add(join(task.rootPath, task.relativePath.split('/')[0]));
@@ -81,7 +84,7 @@ export class TransferService {
     } else await validateUploadPath(task.rootPath, task.localPath, task.isDirectory);
     if (signal.aborted) throw new Error('Transfer cancelled.');
     this.checkAdmission(admission);
-    const operation = this.runner.run(task.direction, { connection: request.connection, key: request.key, kind: task.isDirectory ? 'folder' : 'file', localPath: task.localPath, rootPath: task.rootPath }, progress);
+    const operation = this.runner.run(task.direction, { connection: request.connection, key: request.key, kind: task.isDirectory ? 'folder' : 'file', localPath: task.localPath, rootPath: task.rootPath, ...(task.direction === 'download' && !task.isDirectory ? { resumeId: task.id, sizeHint: task.size } : {}) }, progress);
     const abort = () => operation.cancel();
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
@@ -126,7 +129,7 @@ export class TransferService {
     })();
   }
 
-  async startDownload(id: unknown, key: unknown, kind: 'file' | 'folder', destination: string, admission = this.captureAdmission(id, 'download')): Promise<string> {
+  async startDownload(id: unknown, key: unknown, kind: 'file' | 'folder', destination: string, admission = this.captureAdmission(id, 'download'), sizeHint?: number): Promise<string> {
     await this.ready; this.checkAdmission(admission);
     const epoch = admission.epoch;
     const request = await this.store.forOperation(id, key, 'download', kind);
@@ -147,7 +150,7 @@ export class TransferService {
         const result = await operation.promise; this.check(job, epoch);
         if (!result.objects.length) throw new Error('The S3 folder no longer exists. It may have been deleted. Refresh the folder before retrying this download.');
         plans = downloadPlan(request.key, root, result.objects);
-      } else plans = [{ key: request.key, size: 0, isDirectory: false, localPath: root.path, rootPath: dirname(root.path), relativePath: root.name }];
+      } else plans = [{ key: request.key, size: typeof sizeHint === 'number' && Number.isSafeInteger(sizeHint) && sizeHint >= 0 ? sizeHint : 0, isDirectory: false, localPath: root.path, rootPath: dirname(root.path), relativePath: root.name }];
       return plans.map(plan => ({ ...plan, groupId: job.value.id, direction: 'download', connectionId: id as string, connectionName: request.connectionName, bucket: request.connection.bucket }));
     });
     return job.value.id;

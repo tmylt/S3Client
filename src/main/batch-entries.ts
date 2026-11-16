@@ -9,6 +9,6 @@ export function validateEntryTargets(value: unknown): EntryTarget[] {
       typeof item.key !== 'string' || !item.key || item.key.length > 8192 || item.key.includes('\0') ||
       (item.kind !== 'file' && item.kind !== 'folder') || seen.has(item.key)) throw new Error('Invalid entry selection.');
     seen.add(item.key);
-    return { key: item.key, kind: item.kind };
+    return { key: item.key, kind: item.kind, ...(item.kind === 'file' && typeof item.size === 'number' && Number.isSafeInteger(item.size) && item.size >= 0 ? { size: item.size } : {}) };
   });
 }

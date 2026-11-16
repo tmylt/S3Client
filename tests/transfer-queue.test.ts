@@ -16,6 +16,34 @@ async function make(execute: TransferExecutor, changed?: (snapshot: TransferSnap
 afterEach(async () => { await Promise.all(queues.splice(0).map(queue => queue.dispose())); await Promise.all(directories.splice(0).map(directory => rm(directory, { force: true, recursive: true }))); vi.restoreAllMocks(); });
 
 describe('transfer queue', () => {
+  it('keeps download progress through stop and restart, then discards files on cancellation', async () => {
+    const discarded: string[] = [];
+    const starts: number[] = [];
+    const directory = await mkdtemp(join(tmpdir(), 's3-transfer-queue-')); directories.push(directory);
+    const execute: TransferExecutor = async (item, report, signal) => {
+      starts.push(item.transferred);
+      if (starts.length === 1) {
+        report({ transferred: 5, total: 10 });
+        await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+      } else { report({ transferred: 5, total: 10, resumeOffset: 5 }); report({ transferred: 10, total: 10 }); }
+      return { bytes: 10 };
+    };
+    const discard = async (item: { id: string }) => { discarded.push(item.id); };
+    const queue = new TransferQueue(directory, execute, undefined, discard); queues.push(queue); await queue.initialize();
+    await queue.enqueue([task('one')]);
+    await vi.waitFor(() => expect(queue.snapshot().tasks[0].transferred).toBe(5));
+    await queue.controlAll('download', 'stop');
+    expect(queue.snapshot().tasks[0]).toMatchObject({ status: 'paused', transferred: 5 });
+    await queue.dispose();
+    const restored = new TransferQueue(directory, execute, undefined, discard); queues.push(restored); await restored.initialize();
+    expect(restored.snapshot().tasks[0]).toMatchObject({ status: 'paused', transferred: 5 });
+    await restored.controlAll('download', 'start');
+    await vi.waitFor(() => expect(restored.snapshot().tasks[0]).toMatchObject({ status: 'completed', transferred: 10 }));
+    expect(starts).toEqual([0, 5]);
+    await restored.remove(restored.snapshot().tasks[0].id);
+    expect(discarded).toHaveLength(1);
+  });
+
   it('removes an active row only after cleanup and prevents restarting it while removal is pending', async () => {
     const cleanup = deferred(); const aborted = deferred();
     const { queue } = await make(async (item, progress, signal) => {
@@ -110,7 +138,7 @@ describe('transfer queue', () => {
     await queue.control(queue.snapshot().tasks[0].id, 'start');
     now = 101_000;
     progress.get('down')!({ transferred: 200_000, total: 1_000_000 });
-    expect(queue.snapshot().tasks[0].bytesPerSecond).toBe(200_000);
+    expect(queue.snapshot().tasks[0].bytesPerSecond).toBe(90_000);
     await queue.controlAll('download', 'cancel');
     expect(queue.snapshot().tasks[0].bytesPerSecond).toBe(0);
     await queue.dispose();

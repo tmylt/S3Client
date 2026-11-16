@@ -20,6 +20,7 @@ export interface TransferTask {
   isDirectory: boolean;
   status: TransferStatus;
   error?: string;
+  resumeNote?: string;
   createdAt: string;
   finishedAt?: string;
 }
