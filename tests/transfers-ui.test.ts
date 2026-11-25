@@ -237,6 +237,45 @@ describe('bulk file actions', () => {
 });
 
 describe('transfer panel', () => {
+  it.each(['download', 'upload'] as const)('copies all four path formats from a %s task context menu', async direction => {
+    const localPath = direction === 'download' ? '/chosen/deep/local report.db' : 'C:\\chosen\\deep\\local report.db';
+    const item = task({ direction, bucket: 'my-bucket', key: 'remote/report (6).db', relativePath: 'nested/remote report.db', localPath });
+    const { bridge } = api({ ...connection, uriScheme: 'oss' }, { ...emptyTransferSnapshot(), tasks: [item], preparations: [{ id: 'scan', direction, connectionId: 'a', name: 'Preparing folder', status: 'preparing' }] });
+    render(createElement(App));
+    fireEvent.click(await screen.findByRole('button', { name: direction === 'download' ? /Downloads/ : /Uploads/ }));
+    const dialog = await screen.findByRole('dialog', { name: direction === 'download' ? 'Downloads' : 'Uploads' });
+    const article = within(dialog).getByRole('article', { name: 'nested/remote report.db' });
+    fireEvent.contextMenu(within(dialog).getByRole('article', { name: 'Preparing folder' }));
+    expect(within(dialog).queryByRole('menu')).toBeNull();
+
+    const choices = [
+      ['Copy local file path', localPath],
+      ['Copy S3 URI', 'oss://my-bucket/remote/report (6).db'],
+      ['Copy local file name', 'local report.db'],
+      ['Copy S3 key', 'remote/report (6).db'],
+    ];
+    for (const [label, value] of choices) {
+      fireEvent.contextMenu(article, { clientX: 120, clientY: 150 });
+      expect(within(dialog).getAllByRole('menuitem').map(button => button.textContent)).toEqual(choices.map(([name]) => name));
+      fireEvent.click(within(dialog).getByRole('menuitem', { name: label }));
+      await waitFor(() => expect(bridge.copyText).toHaveBeenLastCalledWith(value));
+      expect(within(dialog).queryByRole('menu')).toBeNull();
+    }
+  });
+
+  it('closes the transfer copy menu on Escape without closing the transfer panel', async () => {
+    api(connection, { ...emptyTransferSnapshot(), tasks: [task()] });
+    render(createElement(App));
+    fireEvent.click(await screen.findByRole('button', { name: /Downloads/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Downloads' });
+    const article = within(dialog).getByRole('article', { name: 'report.txt' });
+    fireEvent.contextMenu(article);
+    expect(within(dialog).getByRole('menu')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(within(dialog).queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Downloads' })).toBeTruthy();
+  });
+
   it.each(['download', 'upload'] as const)('removes every kind of %s row and clears only the current list', async direction => {
     const statuses = ['queued', 'running', 'paused', 'completed', 'cancelled', 'failed'] as const;
     const snapshot: TransferSnapshot = { ...emptyTransferSnapshot(), tasks: statuses.map((status, index) => task({ direction, status, id: `row-${index}`, relativePath: `file-${index}.txt` })), preparations: ['preparing', 'failed', 'cancelled'].map((status, index) => ({ id: `scan-${index}`, direction, connectionId: 'a', name: `folder-${index}`, status: status as 'preparing' | 'failed' | 'cancelled' })) };

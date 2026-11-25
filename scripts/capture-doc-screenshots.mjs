@@ -115,8 +115,11 @@ try {
   const downloads = page.getByRole('dialog', { name: 'Downloads' });
   await downloads.waitFor();
   await downloads.screenshot({ path: `${output}/downloads.png` });
+  await downloads.getByRole('article', { name: 'archive.zip' }).click({ button: 'right' });
+  await downloads.getByRole('menu', { name: 'Transfer copy actions' }).waitFor();
+  await page.screenshot({ path: `${output}/transfer-copy-menu.png` });
   if (errors.length) throw new Error(`Renderer errors: ${errors.join('; ')}`);
-  console.log('Saved five demo screenshots in docs/images/');
+  console.log('Saved six demo screenshots in docs/images/');
 } finally {
   await browser?.close();
   await new Promise(resolveClose => server.close(resolveClose));

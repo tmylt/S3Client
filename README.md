@@ -139,7 +139,11 @@ Enable **Allow deletes** in the connection settings. Click a row's delete icon, 
 
 The **Downloads** and **Uploads** buttons in the header open separate task lists. Each file shows its status, bytes transferred, percentage, and current attempt's speed. The lists offer **Start**, **Stop**, and **Cancel** per task, plus **Start all**, **Stop all**, and **Cancel all**. You can set 1 to 8 concurrent tasks per direction; the default is 1.
 
+Right-click a task row to copy its local file path, S3 URI, local file name, or bare S3 key. Folder preparation rows have no paths to copy until they create file tasks.
+
 ![Download task list showing progress, speed, and task controls](docs/images/downloads.png)
+
+![Download task right-click menu with four copy options](docs/images/transfer-copy-menu.png)
 
 For a file of at least 32 MiB, the app automatically downloads up to four 8 MiB ranges at once when the service supports Range and supplies an ETag. This can improve speed on a connection where one request does not use the available bandwidth. The **Concurrent downloads** control counts files, while each eligible file may use four HTTP requests. Each finished range is saved for resume after a stop, failure, or app restart. Smaller files, older partial downloads, and services without usable Range support use one request at a time.
 

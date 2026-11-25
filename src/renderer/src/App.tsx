@@ -354,7 +354,7 @@ export default function App() {
     </div>
     {toast && <div className="toast" role="status"><Check size={14} />{toast}</div>}
     <div inert={confirmation !== null}>
-      {transferDirection && <TransferPanel key={transferDirection} direction={transferDirection} snapshot={transfers.snapshot} uriSchemes={Object.fromEntries(browser.connections.map(item => [item.id, item.uriScheme || 's3']))} error={transfers.error} onClose={closeTransfers} onControl={transfers.control} onControlAll={transfers.controlAll} onRemove={transfers.remove} onClear={transfers.clear} onConcurrency={transfers.setConcurrency} />}
+      {transferDirection && <TransferPanel key={transferDirection} direction={transferDirection} snapshot={transfers.snapshot} uriSchemes={Object.fromEntries(browser.connections.map(item => [item.id, item.uriScheme || 's3']))} error={transfers.error} onClose={closeTransfers} onControl={transfers.control} onControlAll={transfers.controlAll} onRemove={transfers.remove} onClear={transfers.clear} onConcurrency={transfers.setConcurrency} onCopy={copy} />}
       {video && <VideoPlayer key={`${video.connectionId}:${video.key}`} connectionId={video.connectionId} objectKey={video.key} name={video.name} onClose={() => setVideo(null)} />}
       {dialog && <ConnectionDialog connection={dialog.connection} secureStorage={browser.secureStorage} onSave={save} onClose={closeDialog} />}
       {uploadOpen && connection && location && <UploadDialog connectionId={connection.id} prefix={location.prefix} destination={storageUri(connection, location.prefix)} onUpload={upload} onClose={closeUpload} />}

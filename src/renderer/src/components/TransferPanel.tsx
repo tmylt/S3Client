@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, LoaderCircle, Trash2, X } from 'lucide-react';
 import type { TransferAction, TransferDirection, TransferPreparation, TransferSnapshot, TransferTask } from '../../../shared/transfers';
 import { formatBytes } from '../model';
 import { formatTransferSpeed } from '../../../shared/transfer-speed';
 import { storageUri } from '../../../shared/storage-uri';
+import { TransferCopyMenu } from './TransferCopyMenu';
 
 interface Props {
   direction: TransferDirection;
@@ -16,12 +17,16 @@ interface Props {
   onRemove(id: string): Promise<void>;
   onClear(direction: TransferDirection): Promise<void>;
   onConcurrency(direction: TransferDirection, concurrency: number): Promise<void>;
+  onCopy(text: string, label: string): Promise<void>;
 }
 const PAGE_SIZE = 50;
 const statusLabels = { queued: 'Queued', running: 'Transferring', paused: 'Stopped', completed: 'Completed', cancelled: 'Cancelled', failed: 'Failed' };
+const localFileName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 
-export function TransferPanel({ direction, snapshot, uriSchemes, error, onClose, onControl, onControlAll, onRemove, onClear, onConcurrency }: Props) {
+export function TransferPanel({ direction, snapshot, uriSchemes, error, onClose, onControl, onControlAll, onRemove, onClear, onConcurrency, onCopy }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLElement | null>(null);
+  const [copyTarget, setCopyTarget] = useState<{ id: string; x: number; y: number } | null>(null);
   const [page, setPage] = useState(0);
   const [removing, setRemoving] = useState(new Set<string>());
   const removingRef = useRef(new Set<string>());
@@ -33,14 +38,18 @@ export function TransferPanel({ direction, snapshot, uriSchemes, error, onClose,
   const rows: (TransferTask | TransferPreparation)[] = [...preparations, ...tasks];
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, pages - 1);
+  const visibleRows = rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const copyTask = copyTarget ? visibleRows.find((item): item is TransferTask => item.id === copyTarget.id && 'relativePath' in item) : undefined;
+  const closeCopyMenu = useCallback((restoreFocus: boolean) => { setCopyTarget(null); if (restoreFocus) menuTrigger.current?.focus(); }, []);
   useEffect(() => { setPage(current => Math.min(current, pages - 1)); }, [pages]);
+  useEffect(() => { if (copyTarget && !copyTask) setCopyTarget(null); }, [copyTarget, copyTask]);
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.querySelector<HTMLButtonElement>('button')?.focus();
     const handleKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && ['f', 'r'].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation(); }
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+      if (event.key === 'Escape') { if (dialog.current?.querySelector('[role="menu"]')) return; event.preventDefault(); onClose(); }
       if (event.key !== 'Tab') return;
       const elements = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex="0"]') || []);
       const first = elements[0]; const last = elements[elements.length - 1];
@@ -79,7 +88,7 @@ export function TransferPanel({ direction, snapshot, uriSchemes, error, onClose,
       {error && <div className="form-error" role="alert">{error}</div>}
       <div className="transfer-list" aria-label={`${title} tasks`}>
         {!rows.length && <div className="transfer-empty">No {title.toLowerCase()} yet.</div>}
-        {rows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE).map(item => {
+        {visibleRows.map(item => {
           if (!('relativePath' in item)) return <article className="transfer-item" key={item.id} aria-label={item.name}>
             <div className="transfer-item-heading"><strong>{item.name}</strong><div className="transfer-item-tools"><span className={`transfer-status ${item.status}`}>{item.status === 'preparing' ? <><LoaderCircle size={12} className="spin" />Scanning…</> : statusLabels[item.status]}</span>{removeButton(item.id, item.name)}</div></div>
             {item.error && <p className="transfer-error">{item.error}</p>}
@@ -88,7 +97,7 @@ export function TransferPanel({ direction, snapshot, uriSchemes, error, onClose,
           const percent = item.size > 0 ? Math.min(100, Math.max(0, Math.floor(item.transferred / item.size * 100))) : item.status === 'completed' ? 100 : 0;
           const resumable = item.status === 'paused' || item.status === 'failed';
           const active = item.status === 'running' || item.status === 'queued';
-          return <article className="transfer-item" key={item.id} aria-label={item.relativePath}>
+          return <article className="transfer-item" key={item.id} aria-label={item.relativePath} tabIndex={0} onContextMenu={event => { event.preventDefault(); menuTrigger.current = event.currentTarget; setCopyTarget({ id: item.id, x: event.clientX, y: event.clientY }); }}>
             <div className="transfer-item-heading"><strong title={item.relativePath}>{item.relativePath}</strong><div className="transfer-item-tools"><span className={`transfer-status ${item.status}`}>{statusLabels[item.status]}</span>{removeButton(item.id, item.relativePath)}</div></div>
             <p className="transfer-connection">{item.connectionName} · {storageUri({ bucket: item.bucket, uriScheme: uriSchemes[item.connectionId] }, item.key)}</p>
             <p className="transfer-local-path"><span>{direction === 'download' ? 'Destination' : 'Source'}</span> {item.localPath}</p>
@@ -99,6 +108,7 @@ export function TransferPanel({ direction, snapshot, uriSchemes, error, onClose,
           </article>;
         })}
       </div>
+      {copyTarget && copyTask && <TransferCopyMenu x={copyTarget.x} y={copyTarget.y} onClose={closeCopyMenu} onCopyLocalPath={() => void onCopy(copyTask.localPath, 'Local file path')} onCopyUri={() => void onCopy(storageUri({ bucket: copyTask.bucket, uriScheme: uriSchemes[copyTask.connectionId] }, copyTask.key), 'S3 URI')} onCopyLocalName={() => void onCopy(localFileName(copyTask.localPath), 'Local file name')} onCopyKey={() => void onCopy(copyTask.key, 'S3 key')} />}
       {pages > 1 && <footer className="transfer-pagination"><button className="button secondary" aria-label="Previous page" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button><span>Page {currentPage + 1} of {pages}</span><button className="button secondary" aria-label="Next page" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>Next</button></footer>}
     </div>
   </div>;
