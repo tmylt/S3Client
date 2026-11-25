@@ -309,6 +309,41 @@ describe('resizable file columns', () => {
   });
 });
 
+describe('sorting folder and search result rows', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('sorts names together and places folders last for size in both views', async () => {
+    const pageRows: Entry[] = [
+      { key: 'page-mid/', name: 'page-mid', kind: 'folder', size: null, modified: null },
+      { key: 'page-large.txt', name: 'page-large.txt', kind: 'file', size: 20, modified: null },
+      { key: 'page-small.txt', name: 'page-small.txt', kind: 'file', size: 10, modified: null },
+    ];
+    const searchRows: Entry[] = [
+      { key: 'search-a-mid/', name: 'search-a-mid', kind: 'folder', size: null, modified: null },
+      { key: 'search-a-large.txt', name: 'search-a-large.txt', kind: 'file', size: 20, modified: null },
+      { key: 'search-a-small.txt', name: 'search-a-small.txt', kind: 'file', size: 10, modified: null },
+    ];
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: pageRows, updatedAt: '2026-01-01T00:00:00Z' }]);
+    bridge.search.mockResolvedValue({ entries: searchRows });
+    render(createElement(App));
+    await screen.findByRole('table', { name: 'Folder contents' });
+    const table = () => screen.getByRole('table', { name: 'Folder contents' });
+    const names = () => Array.from(table().querySelectorAll('tbody tr .filename span')).map(item => item.textContent);
+    expect(names()).toEqual(['page-large.txt', 'page-mid', 'page-small.txt']);
+    fireEvent.click(within(table()).getByRole('button', { name: 'Size' }));
+    expect(names()).toEqual(['page-small.txt', 'page-large.txt', 'page-mid']);
+    fireEvent.change(screen.getByLabelText('Name match'), { target: { value: 'contains' } });
+    fireEvent.change(screen.getByLabelText('Search file name'), { target: { value: 'search-a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await screen.findByText('search-a-large.txt');
+    fireEvent.click(within(table()).getByRole('button', { name: 'Size' }));
+    expect(names()).toEqual(['search-a-large.txt', 'search-a-small.txt', 'search-a-mid']);
+    fireEvent.click(within(table()).getByRole('button', { name: 'Name' }));
+    expect(names()).toEqual(['search-a-large.txt', 'search-a-mid', 'search-a-small.txt']);
+    expect(bridge.stats).not.toHaveBeenCalled();
+  });
+});
+
 describe('MP4 preview', () => {
   beforeEach(() => localStorage.clear());
 

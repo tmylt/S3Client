@@ -45,9 +45,12 @@ export function getVisibleEntries(entries: Entry[], query: string, column: SortC
     catch { return []; }
   }
   return entries.filter(entry => !query || (match === 'exact' ? entry.name === query : match === 'prefix' ? entry.name.startsWith(query) : match === 'regex' ? regex!.test(entry.name) : entry.name.toLocaleLowerCase().includes(filter))).sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+    if (column === 'size' || column === 'modified') {
+      if (a.kind !== b.kind) return a.kind === 'folder' ? 1 : -1;
+      if (a.kind === 'folder') return collator.compare(a.name, b.name);
+    }
     let order = 0;
-    if (column === 'size') order = (a.stats?.totalSize ?? a.size ?? -1) - (b.stats?.totalSize ?? b.size ?? -1);
+    if (column === 'size') order = (a.size ?? -1) - (b.size ?? -1);
     else if (column === 'modified') order = (a.modified ?? '').localeCompare(b.modified ?? '');
     else if (column === 'kind') order = collator.compare(fileKind(a), fileKind(b));
     return (order || collator.compare(a.name, b.name)) * (direction === 'asc' ? 1 : -1);

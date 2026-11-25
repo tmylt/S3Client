@@ -36,10 +36,27 @@ describe('S3 navigation', () => {
 });
 
 describe('file list', () => {
-  it('sorts naturally with folders first in both directions and filters by name', () => {
+  it('sorts names and kinds across files and folders, and puts folders last for size and date', () => {
+    const entries: Entry[] = [
+      { ...file('z-folder'), kind: 'folder', stats: { totalSize: 1, fileCount: 1, updatedAt: '2026-01-03T00:00:00Z', durationMs: 1 } },
+      { ...file('b.txt', 20), modified: '2026-01-01T00:00:00Z' },
+      { ...file('a-folder'), kind: 'folder', stats: { totalSize: 100, fileCount: 1, updatedAt: '2026-01-01T00:00:00Z', durationMs: 1 } },
+      { ...file('a.txt', 10), modified: '2026-01-02T00:00:00Z' },
+    ];
+    expect(getVisibleEntries(entries, '', 'name', 'asc').map(item => item.name)).toEqual(['a-folder', 'a.txt', 'b.txt', 'z-folder']);
+    expect(getVisibleEntries(entries, '', 'name', 'desc').map(item => item.name)).toEqual(['z-folder', 'b.txt', 'a.txt', 'a-folder']);
+    expect(getVisibleEntries(entries, '', 'size', 'asc').map(item => item.name)).toEqual(['a.txt', 'b.txt', 'a-folder', 'z-folder']);
+    expect(getVisibleEntries(entries, '', 'size', 'desc').map(item => item.name)).toEqual(['b.txt', 'a.txt', 'a-folder', 'z-folder']);
+    expect(getVisibleEntries(entries, '', 'modified', 'asc').map(item => item.name)).toEqual(['b.txt', 'a.txt', 'a-folder', 'z-folder']);
+    expect(getVisibleEntries(entries, '', 'modified', 'desc').map(item => item.name)).toEqual(['a.txt', 'b.txt', 'a-folder', 'z-folder']);
+    expect(getVisibleEntries(entries, '', 'kind', 'asc').map(item => item.name)).toEqual(['a-folder', 'z-folder', 'a.txt', 'b.txt']);
+    expect(getVisibleEntries(entries, '', 'kind', 'desc').map(item => item.name)).toEqual(['b.txt', 'a.txt', 'z-folder', 'a-folder']);
+  });
+
+  it('sorts names naturally, places folders last for size, and filters by name', () => {
     const entries: Entry[] = [file('file10.txt', 10), file('file2.txt', 2), { ...file('z-folder'), kind: 'folder' }];
-    expect(getVisibleEntries(entries, '', 'name', 'asc').map(x => x.name)).toEqual(['z-folder', 'file2.txt', 'file10.txt']);
-    expect(getVisibleEntries(entries, '', 'size', 'desc').map(x => x.name)).toEqual(['z-folder', 'file10.txt', 'file2.txt']);
+    expect(getVisibleEntries(entries, '', 'name', 'asc').map(x => x.name)).toEqual(['file2.txt', 'file10.txt', 'z-folder']);
+    expect(getVisibleEntries(entries, '', 'size', 'desc').map(x => x.name)).toEqual(['file10.txt', 'file2.txt', 'z-folder']);
     expect(getVisibleEntries(entries, 'FILE2', 'name', 'asc').map(x => x.name)).toEqual(['file2.txt']);
     expect(getVisibleEntries(entries, 'file', 'name', 'asc', 'prefix').map(x => x.name)).toEqual(['file2.txt', 'file10.txt']);
     expect(getVisibleEntries(entries, 'file2.txt', 'name', 'asc', 'exact').map(x => x.name)).toEqual(['file2.txt']);

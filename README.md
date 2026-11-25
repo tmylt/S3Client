@@ -72,7 +72,7 @@ The app also accepts `s3.addressing_style` values `path` and `auto`, retry setti
 - Use the breadcrumbs above the list, **Back**, and **Forward** to navigate. A collapsed tree node hides its children; it does not delete anything.
 - Click the refresh icon beside a tree node to list it again, or **Refresh folder** above the right pane to update the selected folder. Refresh asks S3 for a new result.
 - Use **Previous** and **Next** below the list to load one page at a time. Changing **Page size** applies to all folders in that connection until you close the app. On the next launch, that connection uses its configured **Default page size** again.
-- Click a column heading to sort the displayed rows. Folders appear before files. Drag a column divider to change its width; double-click the divider to reset that column. Wide tables scroll horizontally.
+- Click a column heading to sort the displayed rows. Name sorts files and folders together; Kind sorts by item type. Size and Date modified sort files and place folders at the end without using folder statistics for sorting. Drag a column divider to change its width; double-click the divider to reset that column. Wide tables scroll horizontally.
 - Drag a connection row or its grip in the left sidebar above or below another connection to save a new connection order.
 
 File modification times include hours, minutes, and seconds in your local time. The app remembers the window size, sidebar width, and file-list column widths between launches. Use **View → Reset Sizes to Default** to restore them. **Window → Zoom** toggles maximize and restore. **View → Toggle Full Screen** enters full screen; press **Esc** or **F11** to leave it.
