@@ -174,6 +174,25 @@ describe('file row copy menu', () => {
 describe('cross-connection URI search', () => {
   beforeEach(() => localStorage.clear());
 
+  it('skips a disallowed connection when selecting a connection for a full URI key', async () => {
+    const blocked = { ...connection('blocked', 'reports/'), searchOptions: { ranges: ['page', 'folder', 'recursive', 'key'], matches: ['prefix'] } } as Connection;
+    const allowed = connection('allowed', '');
+    const service = api([blocked, allowed]);
+    render(createElement(App));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search URI across connections' }), { target: { value: 's3://bucket/reports/a.txt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Go to URI' }));
+    await waitFor(() => expect(service.searchUri).toHaveBeenCalledWith('allowed', 'reports/a.txt'));
+  });
+
+  it('reports when matching connections disable full key search', async () => {
+    const service = api([{ ...connection('blocked'), searchOptions: { ranges: ['folder'] as const, matches: ['exact'] as const } }]);
+    render(createElement(App));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search URI across connections' }), { target: { value: 's3://bucket/a.txt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Go to URI' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('No connection allows Full S3 key search');
+    expect(service.searchUri).not.toHaveBeenCalled();
+  });
+
   it('reports when no connection has the URI scheme and bucket', async () => {
     const client = { ...connection('one'), uriScheme: 's3' };
     const service = api([client]);
@@ -688,6 +707,22 @@ describe('cached startup', () => {
 });
 
 describe('loading a connection for editing', () => {
+  it('shows saved search options and includes changes when saving', async () => {
+    const client = { ...connection('a'), searchOptions: { ranges: ['folder', 'recursive'], matches: ['exact', 'regex'] } } as Connection;
+    const bridge = api([client]);
+    render(createElement(App));
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage A' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit connection' }));
+    await screen.findByRole('dialog');
+    expect((screen.getByRole('checkbox', { name: 'This folder' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: 'This page' }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole('checkbox', { name: 'Regex' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: 'Contains' }) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'This page' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Regex' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save connection' }));
+    await waitFor(() => expect(bridge.saveConnection).toHaveBeenCalledWith(expect.objectContaining({ searchOptions: { ranges: ['page', 'folder', 'recursive'], matches: ['exact'] } })));
+  });
   it('loads the configured AK and null region before opening the edit pane', async () => {
     const bridge = api([{ ...connection('a'), region: null, defaultPageSize: 500, hasCredentials: true }]);
     render(createElement(App));
@@ -712,6 +747,51 @@ describe('loading a connection for editing', () => {
     fireEvent.change(screen.getByLabelText(/Default page size/), { target: { value: '500' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save connection' }));
     await waitFor(() => expect(bridge.saveConnection).toHaveBeenCalledWith(expect.objectContaining({ defaultPageSize: 500 })));
+  });
+});
+
+describe('connection search choices', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('clears an old query and uses permitted choices after switching connections', async () => {
+    api([connection('a'), { ...connection('b'), searchOptions: { ranges: ['page'], matches: ['contains'] } } as Connection]);
+    render(createElement(App));
+    await screen.findByRole('button', { name: 'List folder' });
+    fireEvent.change(screen.getByLabelText('Search file name'), { target: { value: 'old-query' } });
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Storage connections' })).getByRole('button', { name: 'B' }));
+    await waitFor(() => expect((screen.getByLabelText('Search range') as HTMLSelectElement).value).toBe('page'));
+    expect((screen.getByLabelText('Name match') as HTMLSelectElement).value).toBe('contains');
+    expect((screen.getByLabelText('Search file name') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByRole('button', { name: 'Search' })).toBeNull();
+  });
+
+  it('shows only allowed ranges and matches and selects a valid fallback', async () => {
+    const client = { ...connection('a'), searchOptions: { ranges: ['recursive'], matches: ['regex'] } } as Connection;
+    const service = api([client]);
+    render(createElement(App));
+    await screen.findByRole('button', { name: 'List folder' });
+    const range = screen.getByLabelText('Search range') as HTMLSelectElement;
+    const match = screen.getByLabelText('Name match') as HTMLSelectElement;
+    expect(Array.from(range.options).map(option => option.value)).toEqual(['recursive']);
+    expect(Array.from(match.options).map(option => option.value)).toEqual(['regex']);
+    expect(range.value).toBe('recursive');
+    expect(match.value).toBe('regex');
+    fireEvent.change(screen.getByLabelText('Search file name'), { target: { value: '^a' } });
+    expect((screen.getByLabelText('Search file name') as HTMLInputElement).value).toBe('^a');
+    expect((screen.getByRole('button', { name: 'Search' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(service.search).toHaveBeenCalledWith('a', '', 'recursive', 'regex', '^a', 1000, null));
+  });
+
+  it('keeps upload available and disables search when no combination is permitted', async () => {
+    const client = { ...connection('a'), permissions: { download: true, upload: true, delete: false }, searchOptions: { ranges: ['key'], matches: ['regex'] } } as Connection;
+    const service = api([client]);
+    render(createElement(App));
+    await screen.findByRole('button', { name: 'List folder' });
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeTruthy();
+    expect(screen.getByText('Search is disabled for this connection.')).toBeTruthy();
+    expect(screen.queryByLabelText('Search range')).toBeNull();
+    expect(service.search).not.toHaveBeenCalled();
   });
 });
 

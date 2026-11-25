@@ -43,6 +43,13 @@ describe('S3 connection boundaries', () => {
     for (const size of [100, 250, 500, 1000]) expect(normalizeConnection({ ...input, defaultPageSize: size }).defaultPageSize).toBe(size);
     for (const size of [0, 200, 2000, '250', null]) expect(() => normalizeConnection({ ...input, defaultPageSize: size as number })).toThrow(/page size/i);
   });
+  it('allows every search mode by default and validates configured allowlists', () => {
+    expect(normalizeConnection(input).searchOptions).toEqual({ ranges: ['page', 'folder', 'recursive', 'key'], matches: ['prefix', 'contains', 'exact', 'regex'] });
+    expect(normalizeConnection({ ...input, searchOptions: { ranges: ['key', 'page'], matches: ['regex', 'exact'] } }).searchOptions).toEqual({ ranges: ['page', 'key'], matches: ['exact', 'regex'] });
+    for (const searchOptions of [{ ranges: ['folder', 'folder'], matches: ['exact'] }, { ranges: ['everything'], matches: ['exact'] }, { ranges: ['folder'], matches: 'exact' }]) {
+      expect(() => normalizeConnection({ ...input, searchOptions })).toThrow(/search/i);
+    }
+  });
   it('defaults URI scheme to s3 and validates custom schemes', () => {
     expect(normalizeConnection(input).uriScheme).toBe('s3');
     expect(normalizeConnection({ ...input, uriScheme: ' OBS ' }).uriScheme).toBe('obs');
@@ -57,6 +64,19 @@ describe('S3 connection boundaries', () => {
 });
 
 describe('ConnectionStore', () => {
+  it('persists and copies search allowlists and defaults older settings to all modes', async () => {
+    const path = await directory();
+    const store = new ConnectionStore(path, secure());
+    const searchOptions = { ranges: ['folder', 'recursive'], matches: ['exact', 'regex'] };
+    const saved = await store.save({ ...input, searchOptions });
+    expect(saved.searchOptions).toEqual(searchOptions);
+    expect((await new ConnectionStore(path, secure()).connections()).connections[0].searchOptions).toEqual(searchOptions);
+    expect((await store.copy(saved.id)).searchOptions).toEqual(searchOptions);
+    const settings = JSON.parse(await readFile(join(path, 'connections.json'), 'utf8'));
+    delete settings.connections[0].searchOptions;
+    await writeFile(join(path, 'connections.json'), JSON.stringify(settings));
+    expect((await new ConnectionStore(path, secure()).connections()).connections[0].searchOptions).toEqual({ ranges: ['page', 'folder', 'recursive', 'key'], matches: ['prefix', 'contains', 'exact', 'regex'] });
+  });
   it('restores and copies a configured default page size, including older settings', async () => {
     const path = await directory();
     const store = new ConnectionStore(path, secure());
@@ -131,7 +151,8 @@ describe('ConnectionStore', () => {
     const store = new ConnectionStore(path, secure());
     for (const operation of ['download', 'upload', 'delete'] as const) {
       const authorized = await store.forOperation(saved.id, 'team/report.csv', operation, 'file');
-      expect(authorized).toEqual({ connectionName: saved.name, key: 'team/report.csv', connection: (await store.forListing(saved.id, 'team/')).connection });
+      const { searchOptions: _searchOptions, ...listingConnection } = (await store.forListing(saved.id, 'team/')).connection;
+      expect(authorized).toEqual({ connectionName: saved.name, key: 'team/report.csv', connection: listingConnection });
       expect(authorized.connection).toMatchObject({ region: 'us-east-1', accessKey: input.accessKey, secretKey: input.secretKey, sessionToken: 'PRIVATE_TOKEN', extraConfig });
     }
   });

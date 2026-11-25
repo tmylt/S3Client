@@ -13,6 +13,7 @@ export interface Connection {
   prefix: string;
   region: string | null;
   defaultPageSize?: number;
+  searchOptions?: SearchOptions;
   hasCredentials: boolean;
   extraConfig?: ExtraConfig;
   permissions?: ConnectionPermissions;
@@ -32,6 +33,7 @@ export interface ConnectionInput {
   prefix: string;
   region: string | null;
   defaultPageSize?: number;
+  searchOptions?: SearchOptions;
   accessKey?: string;
   secretKey?: string;
   sessionToken?: string;
@@ -68,6 +70,7 @@ export interface Listing { entries: Entry[]; nextToken?: string | null }
 export type SearchRange = 'page' | 'folder' | 'recursive' | 'key';
 export type RemoteSearchRange = Exclude<SearchRange, 'page'>;
 export type SearchMatch = 'prefix' | 'contains' | 'exact' | 'regex';
+export interface SearchOptions { ranges: SearchRange[]; matches: SearchMatch[] }
 
 export interface CachedListing extends Listing {
   connectionId: string;

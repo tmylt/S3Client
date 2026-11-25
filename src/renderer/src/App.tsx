@@ -24,6 +24,10 @@ import { defaultSidebarWidth, loadSidebarWidth, resetSidebarWidth, resetVideoPan
 import { defaultPageSize } from '../../shared/page-size';
 import { storageUri, uriLabel } from '../../shared/storage-uri';
 import { matchConnectionUri, parseConnectionUri } from '../../shared/connection-uri-search';
+import { isSearchAllowed, normalizeSearchOptions } from '../../shared/search-options';
+
+const rangeLabels: Record<SearchRange, string> = { page: 'This page', folder: 'This folder', recursive: 'All subfolders', key: 'Full S3 key' };
+const matchLabels: Record<SearchMatch, string> = { prefix: 'Prefix', contains: 'Contains', exact: 'Exact file name', regex: 'Regex' };
 
 export default function App() {
   const browser = useBrowser();
@@ -44,7 +48,7 @@ export default function App() {
   const [checkedKeys, setCheckedKeys] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState<'download' | 'delete' | null>(null);
   const pageSize = location ? browser.sessionPageSizes[location.connectionId] ?? connection?.defaultPageSize ?? defaultPageSize : defaultPageSize;
-  const search = useFileSearch(location?.connectionId, location?.prefix, pageSize, size => { if (location) browser.changePageSize(location.connectionId, size); });
+  const search = useFileSearch(location?.connectionId, location?.prefix, pageSize, size => { if (location) browser.changePageSize(location.connectionId, size); }, connection?.searchOptions);
   const [column, setColumn] = useState<SortColumn>('name');
   const [direction, setDirection] = useState<SortDirection>('asc');
   const [info, setInfo] = useState(false);
@@ -141,8 +145,10 @@ export default function App() {
     const value = uriQuery;
     const uri = parseConnectionUri(value);
     if (!uri) { setUriError('Enter a URI such as s3://bucket/path/to/file.'); return; }
-    const match = matchConnectionUri(value, browser.connections);
-    if (!match) { setUriError(`No connection for ${uri.uriScheme}://${uri.bucket}`); return; }
+    const matchingConnection = matchConnectionUri(value, browser.connections);
+    if (!matchingConnection) { setUriError(`No connection for ${uri.uriScheme}://${uri.bucket}`); return; }
+    const match = uri.key ? matchConnectionUri(value, browser.connections.filter(item => isSearchAllowed(normalizeSearchOptions(item.searchOptions), 'key', 'exact'))) : matchingConnection;
+    if (!match) { setUriError(`No connection allows Full S3 key search for ${uri.uriScheme}://${uri.bucket}`); return; }
     setUriSearching(true);
     setUriError('');
     try {
@@ -314,15 +320,17 @@ export default function App() {
         {connection && location && <div className="location-bar"><div className="breadcrumb" aria-label="Folder path"><Cloud size={15} /><button onClick={() => browser.navigate({ connectionId: connection.id, prefix: connection.prefix })} title={storageUri(connection, connection.prefix)}>{connection.name}</button>{path.map(item => <span key={item.prefix} className="breadcrumb-segment"><ChevronRight size={12} /><button onClick={() => browser.navigate({ connectionId: connection.id, prefix: item.prefix })}>{item.name}</button></span>)}</div><button className="icon-button copy-path" aria-label={`Copy folder ${uriLabel(connection)}`} title={`Copy folder ${uriLabel(connection)}`} onClick={() => void copy(storageUri(connection, location.prefix))}><Copy size={13} /></button></div>}
         {connection && location && <form className="search-strip" onSubmit={event => { event.preventDefault(); setUriResult(null); search.submit(); }}>
           {permissions.upload && <button type="button" className="button secondary search-upload" onClick={() => setUploadOpen(true)}><ArrowUpFromLine size={13} />Upload</button>}
+          {search.available ? <>
           <label className="search-mode-label">Range <select aria-label="Search range" value={search.range} onChange={event => search.setRange(event.target.value as SearchRange)}>
-            <option value="page">This page</option><option value="folder">This folder</option><option value="recursive">All subfolders</option><option value="key">Full S3 key</option>
+            {search.availableRanges.map(range => <option key={range} value={range}>{rangeLabels[range]}</option>)}
           </select></label>
           <label className="search-mode-label">Match <select aria-label="Name match" value={search.match} disabled={search.range === 'key'} onChange={event => search.setMatch(event.target.value as SearchMatch)}>
-            <option value="prefix">Prefix</option><option value="contains">Contains</option><option value="exact">{search.range === 'key' ? 'Exact S3 key' : 'Exact file name'}</option><option value="regex">Regex</option>
+            {search.availableMatches.map(match => <option key={match} value={match}>{search.range === 'key' ? 'Exact S3 key' : matchLabels[match]}</option>)}
           </select></label>
           <label className="search-field"><Search size={15} /><input ref={searchRef} aria-label={search.range === 'key' ? 'Full S3 key' : 'Search file name'} aria-invalid={Boolean(search.patternError)} placeholder={search.range === 'key' ? 'Full file key or folder path' : search.match === 'exact' ? 'Exact file name' : search.match === 'prefix' ? 'File name prefix' : search.match === 'regex' ? 'Regex pattern (no / delimiters)' : 'Part of a name'} value={search.query} onChange={event => search.setQuery(event.target.value)} />{search.query && <button type="button" className="icon-button" aria-label="Clear search" onClick={() => search.setQuery('')}><X size={13} /></button>}</label>
           {search.range !== 'page' && <button type="submit" className="button secondary search-submit" disabled={!search.query || Boolean(search.patternError) || search.loading}>{search.loading ? <LoaderCircle size={13} className="spin" /> : <Search size={13} />}Search</button>}
           <span className="search-scope-hint">{search.range === 'page' ? 'Filters loaded items only' : search.range === 'key' ? 'Checks an exact file or folder path in this connection' : search.range === 'recursive' ? 'Scans all keys below this folder' : search.match === 'exact' ? 'Checks one S3 key' : search.match === 'prefix' ? 'Lists matching names across pages' : 'Scans this folder’s listing'}</span>
+          </> : <span className="search-scope-hint">Search is disabled for this connection.</span>}
         </form>}
         {search.patternError && <div className="search-pattern-feedback" role="alert">{search.patternError}</div>}
         <div className="content-area">

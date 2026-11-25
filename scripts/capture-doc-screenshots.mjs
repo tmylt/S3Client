@@ -94,7 +94,7 @@ try {
   await dialog.getByLabel('Connection name').fill('My project files');
   await dialog.getByLabel('Endpoint URL').fill('https://s3.example.test');
   await dialog.getByLabel('Bucket', { exact: true }).fill('project-files');
-  await dialog.getByLabel('Prefix', { exact: false }).fill('reports/');
+  await dialog.getByRole('textbox', { name: /Prefix/ }).fill('reports/');
   await dialog.screenshot({ path: `${output}/connection.png` });
   await dialog.getByLabel('Access key (AK)').fill('DEMO_ACCESS_KEY');
   await dialog.getByLabel('Secret key (SK)').fill('demo-secret-key');

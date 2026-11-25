@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Entry, FolderStats, RemoteSearchRange, SearchMatch, SearchRange } from '../../shared/types';
+import type { Entry, FolderStats, RemoteSearchRange, SearchMatch, SearchOptions, SearchRange } from '../../shared/types';
 import { getVisibleEntries, type SortColumn, type SortDirection } from './model';
 import { defaultPageSize, isPageSize } from '../../shared/page-size';
 import { compileSearchRegex } from '../../shared/search-regex';
+import { availableSearchRanges, isSearchAllowed, normalizeSearchOptions, resolveSearchMode } from '../../shared/search-options';
 
 interface Result {
   connectionId: string;
@@ -16,9 +17,17 @@ interface Result {
   tokens: (string | null)[];
 }
 
-export function useFileSearch(connectionId?: string, prefix?: string, pageSize = defaultPageSize, onPageSizeChange?: (size: number) => void) {
-  const [range, setRangeState] = useState<SearchRange>('folder');
-  const [match, setMatchState] = useState<SearchMatch>('exact');
+export function useFileSearch(connectionId?: string, prefix?: string, pageSize = defaultPageSize, onPageSizeChange?: (size: number) => void, searchOptions?: SearchOptions) {
+  const policyKey = JSON.stringify(searchOptions ?? null);
+  const allowed = useMemo(() => normalizeSearchOptions(searchOptions), [policyKey]);
+  const [rangeState, setRangeState] = useState<SearchRange>('folder');
+  const [matchState, setMatchState] = useState<SearchMatch>('exact');
+  const mode = resolveSearchMode(allowed, rangeState, matchState);
+  const range = mode?.range ?? 'folder';
+  const match = mode?.match ?? 'exact';
+  const available = mode !== null;
+  const availableRanges = availableSearchRanges(allowed);
+  const availableMatches = range === 'key' ? allowed.matches.filter(value => value === 'exact') : allowed.matches;
   const [query, setQueryState] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState('');
@@ -39,14 +48,14 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
     setRecursivePage(0);
   }, []);
 
-  useEffect(() => { setQueryState(''); invalidate(); }, [connectionId, prefix, invalidate]);
-  const setRange = useCallback((value: SearchRange) => { setRangeState(value); if (value === 'key') setMatchState('exact'); invalidate(); }, [invalidate]);
-  const setMatch = useCallback((value: SearchMatch) => { setMatchState(value); invalidate(); }, [invalidate]);
+  useEffect(() => { setQueryState(''); invalidate(); }, [connectionId, prefix, policyKey, invalidate]);
+  const setRange = useCallback((value: SearchRange) => { if (!availableSearchRanges(allowed).includes(value)) return; setRangeState(value); if (value === 'key') setMatchState('exact'); invalidate(); }, [allowed, invalidate]);
+  const setMatch = useCallback((value: SearchMatch) => { if (!allowed.matches.includes(value) || (range === 'key' && value !== 'exact')) return; setMatchState(value); invalidate(); }, [allowed, range, invalidate]);
   const setQuery = useCallback((value: string) => { setQueryState(value); invalidate(); }, [invalidate]);
   const activeResult = result?.connectionId === connectionId && result?.prefix === prefix && result?.range === range && result?.match === match && result?.name === query ? result : null;
 
   const fetch = useCallback(async (searchRange: RemoteSearchRange, searchMatch: SearchMatch, name: string, size: number, index: number, token: string | null, tokens: (string | null)[]) => {
-    if (!connectionId || prefix === undefined) return;
+    if (!connectionId || prefix === undefined || !isSearchAllowed(allowed, searchRange, searchMatch)) return;
     const ticket = ++sequence.current;
     setLoading(true);
     setError('');
@@ -59,15 +68,15 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
       setResult(null);
       setError(cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : 'Unable to search this folder.');
     } finally { if (sequence.current === ticket) setLoading(false); }
-  }, [connectionId, prefix]);
+  }, [connectionId, prefix, allowed]);
 
   const submit = useCallback(() => {
-    if (range === 'page' || !query || patternError) return;
+    if (!available || range === 'page' || !query || patternError) return;
     if ((range !== 'key' && match !== 'regex' && query.includes('/')) || query.includes('\0')) { invalidate(); setError(range === 'key' ? 'Enter a valid S3 key.' : 'Enter a file name without a slash.'); return; }
     setResult(null);
     setRecursivePage(0);
     void fetch(range, match, query, pageSize, 0, null, [null]);
-  }, [range, match, query, patternError, pageSize, fetch, invalidate]);
+  }, [available, range, match, query, patternError, pageSize, fetch, invalidate]);
 
   const next = useCallback(() => {
     if (!activeResult || loading) return;
@@ -100,7 +109,7 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
   const locallyPaged = range === 'recursive' || match === 'contains' || match === 'regex';
   const hasNext = locallyPaged ? (recursivePage + 1) * pageSize < (activeResult?.entries.length || 0) : Boolean(activeResult?.nextToken);
   const pageIndex = locallyPaged ? recursivePage : activeResult?.pageIndex ?? 0;
-  const active = range !== 'page' && Boolean(query) && (Boolean(activeResult) || loading || Boolean(error));
+  const active = available && range !== 'page' && Boolean(query) && (Boolean(activeResult) || loading || Boolean(error));
 
-  return { range, match, query, patternError, setRange, setMatch, setQuery, submit, active, result: activeResult, error, loading, pageSize, pageIndex, hasNext, next, previous, setPageSize, displayEntries, invalidate, setEntryStats };
+  return { range, match, available, availableRanges, availableMatches, query, patternError, setRange, setMatch, setQuery, submit, active, result: activeResult, error, loading, pageSize, pageIndex, hasNext, next, previous, setPageSize, displayEntries, invalidate, setEntryStats };
 }

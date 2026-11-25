@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { serializeExtraConfig } from '../shared/extra-config';
 import { defaultPageSize } from '../shared/page-size';
 import { compileSearchRegex } from '../shared/search-regex';
+import { isSearchAllowed, normalizeSearchOptions } from '../shared/search-options';
 import { ConnectionStore, validatePrefix, type WorkerConnection } from './connections';
 import { ListingCache, type CacheScope } from './listing-cache';
 import { FolderStatsHistoryStore } from './folder-stats-history';
@@ -123,6 +124,7 @@ export class ListingService {
     }
     if (match === 'regex') compileSearchRegex(name);
     const request = await this.store.forListing(id, prefix);
+    if (!isSearchAllowed(normalizeSearchOptions(request.connection.searchOptions), range, match)) throw new Error('This search mode is not allowed by this connection.');
     if (range === 'key' && !name.startsWith(request.connection.prefix)) throw new Error('The S3 key is outside this connection’s prefix.');
     if (Buffer.byteLength(match === 'regex' ? name : range === 'key' ? name : request.prefix + name, 'utf8') > 1024) throw new Error(match === 'regex' ? 'The regex pattern exceeds 1,024 bytes.' : 'The S3 key exceeds 1,024 bytes.');
     return this.worker.search(request.connection, request.prefix, range, match, name, pageSize, continuationToken);
@@ -133,6 +135,7 @@ export class ListingService {
     const { connections } = await this.store.connections();
     const selected = connections.find(connection => connection.id === id);
     if (!selected) throw new Error('This connection no longer exists.');
+    if (!isSearchAllowed(normalizeSearchOptions(selected.searchOptions), 'key', 'exact')) throw new Error('Full S3 key search is not allowed by this connection.');
     const request = await this.store.forListing(id, selected.prefix);
     return this.worker.search({ ...request.connection, prefix: '' }, '', 'key', 'exact', key, 1000, null);
   }

@@ -29,13 +29,14 @@ The release also provides a [SHA-256 checksum file](https://github.com/tmylt/S3C
 2. Fill in the connection name, endpoint URL, bucket, access key, and secret key.
 3. Enter a region if your provider supplies one. Set a prefix if you want the connection to start inside a folder.
 4. Review the **Allow downloads**, **Allow uploads**, and **Allow deletes** checkboxes. Downloads are enabled by default; uploads and deletes are disabled by default.
-5. Click **Connect & browse**. The app checks the connection and opens its first folder page.
+5. Review **Search ranges** and **Search matches**. All choices are enabled by default; clear any you do not want available for this connection.
+6. Click **Connect & browse**. The app checks the connection and opens its first folder page.
 
 ![Connection form with an example endpoint, bucket, and prefix](docs/images/connection.png)
 
 Scroll down in the form to set permissions and enter your access key and secret key. The secret key stays masked unless you click the eye button.
 
-![Connection permissions and credentials with a masked example secret key](docs/images/credentials.png)
+![Connection search choices and credentials with a masked example secret key](docs/images/credentials.png)
 
 | Field | What to enter |
 | --- | --- |
@@ -46,6 +47,7 @@ Scroll down in the form to set permissions and enter your access key and secret 
 | **URI scheme** | The scheme shown in copied addresses, such as `s3`, `oss`, or `obs`. This does not change the API endpoint. |
 | **Prefix** | Optional starting folder, for example `projects/reports/`. Leave blank for the whole bucket. |
 | **Default page size** | Number of immediate items requested per page: 100, 250, 500, or 1,000. The default is 1,000. |
+| **Search ranges / Search matches** | Check the search modes available for this connection. All are checked by default. |
 | **Access key / Secret key** | Credentials issued by the storage provider. Use **Temporary credentials** to add a session token if required. |
 
 You can enter a full URI in **Prefix**, such as `s3://my-bucket/projects/reports/`, and leave **Bucket** blank. The URI scheme must match the connection's **URI scheme** field. Browsing and file actions stay within the resulting bucket and prefix. The app adds a trailing `/` to folder prefixes when needed.
@@ -89,6 +91,8 @@ Only the first page is restored automatically at startup. Opening a later page r
 
 The search controls above the file list have **Range** and **Match** selectors. The default is **This folder + Exact file name**. Type a name and press **Enter** or **Search** unless you choose **This page**, which filters as you type.
 
+Use **Edit connection → Search ranges / Search matches** to control which choices appear here. The two groups are independent. **Full S3 key** needs **Exact file name**; if Exact is unchecked, Full S3 key is unavailable even when its range is checked. If no valid pair remains, the search controls say search is disabled for that connection. Upload stays available if its permission is enabled. A copied connection keeps the same search settings.
+
 ![Search for filenames containing invoice in all subfolders](docs/images/search.png)
 
 | Range | What it searches | Useful for |
@@ -103,6 +107,8 @@ The search controls above the file list have **Range** and **Match** selectors. 
 **Regex** uses case-sensitive JavaScript regular expression syntax without surrounding `/` characters. For example, `^invoice-[0-9]{4}\.pdf$` matches names such as `invoice-2026.pdf`. Regex matches item names rather than full paths: **This folder** includes immediate files and folders; **All subfolders** matches file names at any depth. Invalid patterns show an error before a search starts.
 
 The search box at the right of the top toolbar accepts a full URI, such as `oss://my-bucket/reports/2026/`. It searches across saved connections with that URI scheme and bucket. If several connections match, it favors one whose configured prefix contains the key, then the connection with the longest matching folder path; a tie follows sidebar order. If no connection has that scheme and bucket, the app says so. A result outside the chosen connection's normal browsing prefix is shown read-only.
+
+For a URI with a file or folder key, the top search uses only connections that allow **Full S3 key** and **Exact file name**. A bucket-root URI can still open a matching connection without those search options.
 
 ## File and folder actions
 

@@ -6,6 +6,7 @@ import { normalizeExtraConfig } from '../shared/extra-config';
 import { connectionPermissions } from '../shared/permissions';
 import { defaultPageSize, isPageSize } from '../shared/page-size';
 import { isConnectionUri } from '../shared/storage-uri';
+import { normalizeSearchOptions } from '../shared/search-options';
 
 /** Kept separate from Electron so persistence can be exercised against real files. */
 export interface SecretStorage {
@@ -68,7 +69,7 @@ export function normalizeConnection(value: unknown): Omit<StoredConnection, 'id'
   const region = string(input.region ?? '', 'region', 200).trim() || null;
   const pageSize = input.defaultPageSize === undefined ? defaultPageSize : input.defaultPageSize;
   if (!isPageSize(pageSize)) throw new Error('Choose a valid default page size.');
-  return { name, endpoint: url.href.replace(/\/$/, ''), bucket, uriScheme, prefix: directoryPrefix(prefix), region, defaultPageSize: pageSize, extraConfig: normalizeExtraConfig(input.extraConfig), permissions: normalizePermissions(input.permissions) };
+  return { name, endpoint: url.href.replace(/\/$/, ''), bucket, uriScheme, prefix: directoryPrefix(prefix), region, defaultPageSize: pageSize, searchOptions: normalizeSearchOptions(input.searchOptions), extraConfig: normalizeExtraConfig(input.extraConfig), permissions: normalizePermissions(input.permissions) };
 }
 
 function parseCredentials(value: unknown): Credentials {
@@ -134,7 +135,7 @@ export class ConnectionStore {
 
   private public(record: StoredConnection): Connection {
     const { encryptedCredentials, ...metadata } = record;
-    return { ...metadata, extraConfig: normalizeExtraConfig(record.extraConfig), permissions: connectionPermissions(record.permissions), hasCredentials: this.credentials.has(record.id) || Boolean(encryptedCredentials && !this.locked.has(record.id)) };
+    return { ...metadata, searchOptions: normalizeSearchOptions(record.searchOptions), extraConfig: normalizeExtraConfig(record.extraConfig), permissions: connectionPermissions(record.permissions), hasCredentials: this.credentials.has(record.id) || Boolean(encryptedCredentials && !this.locked.has(record.id)) };
   }
 
   private async persist(records: StoredConnection[]): Promise<void> {
@@ -250,7 +251,7 @@ export class ConnectionStore {
         number++;
       } while (this.records.some(item => item.name === name));
       // Encrypted credentials can be duplicated without prompting the key store.
-      const record: StoredConnection = { ...source, id: randomUUID(), name, extraConfig: normalizeExtraConfig(source.extraConfig), permissions: connectionPermissions(source.permissions) };
+      const record: StoredConnection = { ...source, id: randomUUID(), name, searchOptions: normalizeSearchOptions(source.searchOptions), extraConfig: normalizeExtraConfig(source.extraConfig), permissions: connectionPermissions(source.permissions) };
       const next = [...this.records, record];
       await this.persist(next);
       this.records = next;
@@ -297,7 +298,7 @@ export class ConnectionStore {
       if (!record) throw new Error('This connection no longer exists.');
       const prefix = validatePrefix(record.prefix, requestedPrefix);
       const credentials = await this.unlock(record);
-      return { connection: { endpoint: record.endpoint, bucket: record.bucket, uriScheme: record.uriScheme, prefix: record.prefix, region: record.region ?? 'us-east-1', extraConfig: normalizeExtraConfig(record.extraConfig), ...credentials }, prefix };
+      return { connection: { endpoint: record.endpoint, bucket: record.bucket, uriScheme: record.uriScheme, prefix: record.prefix, region: record.region ?? 'us-east-1', searchOptions: normalizeSearchOptions(record.searchOptions), extraConfig: normalizeExtraConfig(record.extraConfig), ...credentials }, prefix };
     });
   }
 

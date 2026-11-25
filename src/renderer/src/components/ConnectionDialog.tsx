@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Cloud, Eye, EyeOff, LoaderCircle, LockKeyhole, X } from 'lucide-react';
-import type { ConnectionDetails, ConnectionInput } from '../../../shared/types';
+import type { ConnectionDetails, ConnectionInput, SearchMatch, SearchOptions, SearchRange } from '../../../shared/types';
 import { parseExtraConfig } from '../../../shared/extra-config';
 import { connectionPermissions } from '../../../shared/permissions';
 import { defaultPageSize, pageSizes } from '../../../shared/page-size';
 import { isConnectionUri } from '../../../shared/storage-uri';
+import { normalizeSearchOptions, searchMatches, searchRanges } from '../../../shared/search-options';
+
+const rangeLabels: Record<SearchRange, string> = { page: 'This page', folder: 'This folder', recursive: 'All subfolders', key: 'Full S3 key' };
+const matchLabels: Record<SearchMatch, string> = { prefix: 'Prefix', contains: 'Contains', exact: 'Exact file name', regex: 'Regex' };
 
 interface Props {
   connection?: ConnectionDetails;
@@ -19,7 +23,7 @@ export function ConnectionDialog({ connection, secureStorage, onSave, onClose }:
   const [error, setError] = useState('');
   const [reveal, setReveal] = useState(false);
   const [extraConfigText, setExtraConfigText] = useState(connection?.extraConfig && Object.keys(connection.extraConfig).length ? JSON.stringify(connection.extraConfig, null, 2) : '');
-  const [form, setForm] = useState<ConnectionInput>({ id: connection?.id, name: connection?.name || '', endpoint: connection?.endpoint || 'https://s3.amazonaws.com', bucket: connection?.bucket || '', uriScheme: connection?.uriScheme || 's3', prefix: connection?.prefix || '', region: connection ? connection.region ?? '' : 'us-east-1', defaultPageSize: connection?.defaultPageSize ?? defaultPageSize, accessKey: connection?.accessKey ?? '', secretKey: connection?.secretKey ?? '', sessionToken: '', permissions: connectionPermissions(connection?.permissions) });
+  const [form, setForm] = useState<ConnectionInput>({ id: connection?.id, name: connection?.name || '', endpoint: connection?.endpoint || 'https://s3.amazonaws.com', bucket: connection?.bucket || '', uriScheme: connection?.uriScheme || 's3', prefix: connection?.prefix || '', region: connection ? connection.region ?? '' : 'us-east-1', defaultPageSize: connection?.defaultPageSize ?? defaultPageSize, accessKey: connection?.accessKey ?? '', secretKey: connection?.secretKey ?? '', sessionToken: '', permissions: connectionPermissions(connection?.permissions), searchOptions: normalizeSearchOptions(connection?.searchOptions) });
   const busyRef = useRef(false);
   busyRef.current = busy;
 
@@ -40,6 +44,12 @@ export function ConnectionDialog({ connection, secureStorage, onSave, onClose }:
   }, [onClose]);
 
   const set = (field: keyof ConnectionInput, value: string) => setForm(current => ({ ...current, [field]: value }));
+  const toggleSearchOption = (kind: keyof SearchOptions, value: SearchRange | SearchMatch, checked: boolean) => setForm(current => {
+    const options = normalizeSearchOptions(current.searchOptions);
+    const allowed = kind === 'ranges' ? searchRanges : searchMatches;
+    const selected = options[kind] as string[];
+    return { ...current, searchOptions: { ...options, [kind]: allowed.filter(option => option === value ? checked : selected.includes(option)) } };
+  });
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
@@ -73,6 +83,11 @@ export function ConnectionDialog({ connection, secureStorage, onSave, onClose }:
           <label>Extra config (JSON) <span className="optional">optional</span><textarea value={extraConfigText} onChange={event => setExtraConfigText(event.target.value)} rows={3} maxLength={65536} spellCheck={false} placeholder={'{"s3":{"addressing_style":"virtual"}}'} /><span className="field-hint">S3 addressing style, retry, and timeout options. For Aliyun, use the virtual addressing example above.</span></label>
           <div className="connection-permissions">
             {(['download', 'upload', 'delete'] as const).map(operation => <label key={operation}><input type="checkbox" checked={form.permissions?.[operation] ?? false} onChange={event => setForm(current => ({ ...current, permissions: { ...connectionPermissions(current.permissions), [operation]: event.target.checked } }))} />Allow {operation}s</label>)}
+          </div>
+          <div className="connection-search-options" aria-label="Allowed search options">
+            <div><strong>Search ranges</strong><div className="connection-search-checks">{searchRanges.map(range => <label key={range}><input type="checkbox" checked={form.searchOptions?.ranges.includes(range) ?? false} onChange={event => toggleSearchOption('ranges', range, event.target.checked)} />{rangeLabels[range]}</label>)}</div></div>
+            <div><strong>Search matches</strong><div className="connection-search-checks">{searchMatches.map(match => <label key={match}><input type="checkbox" checked={form.searchOptions?.matches.includes(match) ?? false} onChange={event => toggleSearchOption('matches', match, event.target.checked)} />{matchLabels[match]}</label>)}</div></div>
+            <span className="field-hint">Full S3 key also needs Exact file name. Clear every option in either group to disable search.</span>
           </div>
           <div className="form-divider" />
           <label>Access key (AK)<input value={form.accessKey} onChange={e => set('accessKey', e.target.value)} placeholder="Your access key ID" required={!connection?.hasCredentials} autoComplete="off" spellCheck={false} /></label>

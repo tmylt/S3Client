@@ -33,6 +33,15 @@ describe('persistent listing service', () => {
     expect(worker.list).not.toHaveBeenCalled();
     expect((await service.connections()).cachedListings).toEqual([]);
   });
+  it('rejects search ranges and match types disabled on the connection', async () => {
+    const { service, saved, store, worker } = await setup();
+    await store.save({ ...settings, id: saved.id, secretKey: '', searchOptions: { ranges: ['folder'], matches: ['regex'] } });
+    await expect(service.search(saved.id, saved.prefix, 'folder', 'regex', '^file')).resolves.toEqual(listing);
+    await expect(service.search(saved.id, saved.prefix, 'folder', 'exact', 'file.txt')).rejects.toThrow(/not allowed|disabled/i);
+    await expect(service.search(saved.id, saved.prefix, 'recursive', 'regex', '^file')).rejects.toThrow(/not allowed|disabled/i);
+    await expect(service.searchUri(saved.id, 'root/file.txt')).rejects.toThrow(/not allowed|disabled/i);
+    expect(worker.search).toHaveBeenCalledTimes(1);
+  });
   it('validates regex patterns before passing them to the S3 worker', async () => {
     const { service, saved, worker } = await setup();
     await expect(service.search(saved.id, saved.prefix, 'folder', 'regex', '^report-[0-9]+\\.csv$')).resolves.toEqual(listing);

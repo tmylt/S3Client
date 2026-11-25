@@ -174,7 +174,7 @@ async function checkConnectionCopy(page: Page, sourceName: string, prefix: strin
   await expect(dialog.getByLabel('Connection name')).toHaveValue(copiedName);
   await expect(dialog.getByLabel('Endpoint URL')).toHaveValue(endpoint);
   await expect(dialog.getByLabel('Bucket', { exact: true })).toHaveValue('desktop-fixtures');
-  await expect(dialog.getByLabel('Prefix', { exact: false })).toHaveValue(prefix);
+  await expect(dialog.getByRole('textbox', { name: /Prefix/ })).toHaveValue(prefix);
   await expect(dialog.getByLabel('Region', { exact: false })).toHaveValue('');
   await expect(dialog.getByLabel('Access key (AK)')).toHaveValue('test-access');
   expect(JSON.parse(await dialog.getByLabel('Extra config (JSON)', { exact: false }).inputValue())).toEqual(extraConfig);
@@ -212,14 +212,14 @@ test('browse, refresh, paginate, reconnect and remove through the real Electron/
   await dialog.getByLabel('Connection name').fill('Local S3');
   await dialog.getByLabel('Endpoint URL').fill(endpoint);
   await dialog.getByLabel('Bucket', { exact: true }).fill('desktop-fixtures');
-  await dialog.getByLabel('Prefix', { exact: false }).fill('workspace/');
+  await dialog.getByRole('textbox', { name: /Prefix/ }).fill('workspace/');
   await dialog.getByLabel('Extra config (JSON)', { exact: false }).fill(JSON.stringify(extraConfig));
   await dialog.getByLabel('Access key (AK)').fill('test-access');
   await dialog.getByLabel('Secret key (SK)').fill('test-secret');
   await dialog.getByLabel('Connection name').fill('Local S3');
-  await dialog.getByLabel('Prefix', { exact: false }).fill('workspace/');
+  await dialog.getByRole('textbox', { name: /Prefix/ }).fill('workspace/');
   await expect(dialog.getByLabel('Connection name')).toHaveValue('Local S3');
-  await expect(dialog.getByLabel('Prefix', { exact: false })).toHaveValue('workspace/');
+  await expect(dialog.getByRole('textbox', { name: /Prefix/ })).toHaveValue('workspace/');
   await dialog.getByRole('button', { name: 'Connect & browse' }).click();
   const table = page.getByRole('table', { name: 'Folder contents' });
   await expect(table.getByRole('row')).toHaveCount(7); // header + four folders + two files
@@ -430,7 +430,7 @@ for (const packaged of [false, true]) test(`records folder statistics history af
   await settings.getByLabel('Connection name').fill('History fixture');
   await settings.getByLabel('Endpoint URL').fill(endpoint);
   await settings.getByLabel('Bucket', { exact: true }).fill('desktop-fixtures');
-  await settings.getByLabel('Prefix', { exact: false }).fill(prefix);
+  await settings.getByRole('textbox', { name: /Prefix/ }).fill(prefix);
   await settings.getByLabel('Extra config (JSON)', { exact: false }).fill(JSON.stringify(extraConfig));
   await settings.getByLabel('Access key (AK)').fill('test-access');
   await settings.getByLabel('Secret key (SK)').fill('test-secret');
@@ -534,7 +534,7 @@ for (const packaged of [false, true]) test(`copies a file and a folder within on
   await settings.getByLabel('Connection name').fill('Copy fixtures');
   await settings.getByLabel('Endpoint URL').fill(endpoint);
   await settings.getByLabel('Bucket', { exact: true }).fill('desktop-fixtures');
-  await settings.getByLabel('Prefix', { exact: false }).fill('workspace/');
+  await settings.getByRole('textbox', { name: /Prefix/ }).fill('workspace/');
   await settings.getByLabel('Extra config (JSON)', { exact: false }).fill(JSON.stringify(extraConfig));
   await settings.getByLabel('Access key (AK)').fill('test-access');
   await settings.getByLabel('Secret key (SK)').fill('test-secret');
@@ -574,7 +574,7 @@ for (const packaged of [false, true]) test(`renames a file and a folder through 
   await settings.getByLabel('Connection name').fill('Rename fixtures');
   await settings.getByLabel('Endpoint URL').fill(endpoint);
   await settings.getByLabel('Bucket', { exact: true }).fill('desktop-fixtures');
-  await settings.getByLabel('Prefix', { exact: false }).fill('workspace/');
+  await settings.getByRole('textbox', { name: /Prefix/ }).fill('workspace/');
   await settings.getByLabel('Extra config (JSON)', { exact: false }).fill(JSON.stringify(extraConfig));
   await settings.getByLabel('Access key (AK)').fill('test-access');
   await settings.getByLabel('Secret key (SK)').fill('test-secret');
@@ -633,7 +633,7 @@ test('packaged app lists real S3 objects without Python', async () => {
   await dialog.getByLabel('Connection name').fill('Packaged S3');
   await dialog.getByLabel('Endpoint URL').fill(endpoint);
   await dialog.getByLabel('Region', { exact: false }).fill('');
-  await dialog.getByLabel('Prefix', { exact: false }).fill('s3://desktop-fixtures/workspace/documents/');
+  await dialog.getByRole('textbox', { name: /Prefix/ }).fill('s3://desktop-fixtures/workspace/documents/');
   await dialog.getByLabel('Extra config (JSON)', { exact: false }).fill(JSON.stringify(extraConfig));
   await dialog.getByLabel('Access key (AK)').fill('test-access');
   await dialog.getByLabel('Secret key (SK)').fill('test-secret');
@@ -931,7 +931,7 @@ for (const packaged of [false, true]) test(`copies connection URIs with a saved 
   await dialog.getByLabel('Connection name').fill('Scheme S3');
   await dialog.getByLabel('Endpoint URL').fill(endpoint);
   await dialog.getByLabel('URI scheme').fill('obs');
-  await dialog.getByLabel('Prefix', { exact: false }).fill('obs://desktop-fixtures/workspace/');
+  await dialog.getByRole('textbox', { name: /Prefix/ }).fill('obs://desktop-fixtures/workspace/');
   await dialog.getByLabel('Access key (AK)').fill('test-access');
   await dialog.getByLabel('Secret key (SK)').fill('test-secret');
   await dialog.getByRole('button', { name: 'Connect & browse' }).click();
@@ -985,7 +985,7 @@ for (const packaged of [false, true]) test(`searches a URI across connections ($
   await dialog.getByLabel('Connection name').fill('URI Search S3');
   await dialog.getByLabel('Endpoint URL').fill(endpoint);
   await dialog.getByLabel('Bucket', { exact: true }).fill('desktop-fixtures');
-  await dialog.getByLabel('Prefix', { exact: false }).fill('workspace/photos/');
+  await dialog.getByRole('textbox', { name: /Prefix/ }).fill('workspace/photos/');
   await dialog.getByLabel('Access key (AK)').fill('test-access');
   await dialog.getByLabel('Secret key (SK)').fill('test-secret');
   await dialog.getByRole('button', { name: 'Connect & browse' }).click();
@@ -1019,4 +1019,38 @@ for (const packaged of [false, true]) test(`searches a URI across connections ($
   await table.getByRole('row').filter({ hasText: 'workspace/documents/' }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Copy folder name' }).click();
   expect(await app!.evaluate(({ clipboard }) => clipboard.readText())).toBe('documents');
+});
+
+test('keeps connection search restrictions after restarting the hidden desktop app', async () => {
+  const profile = join(directory, 'restricted-search');
+  await mkdir(profile);
+  let page = await launch(false, profile);
+  await page.getByRole('button', { name: 'Add connection' }).first().click();
+  let dialog = page.getByRole('dialog', { name: 'Connect your storage' });
+  await dialog.getByLabel('Connection name').fill('Restricted search');
+  await dialog.getByLabel('Endpoint URL').fill(endpoint);
+  await dialog.getByLabel('Bucket', { exact: true }).fill('desktop-fixtures');
+  await dialog.getByRole('textbox', { name: /Prefix/ }).fill('workspace/');
+  await dialog.getByLabel('Access key (AK)').fill('test-access');
+  await dialog.getByLabel('Secret key (SK)').fill('test-secret');
+  for (const name of ['This page', 'All subfolders', 'Full S3 key', 'Prefix', 'Contains', 'Regex']) await dialog.getByRole('checkbox', { name }).uncheck();
+  await dialog.getByRole('button', { name: 'Connect & browse' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel('Search range')).toHaveValue('folder');
+  await expect(page.getByLabel('Name match')).toHaveValue('exact');
+  await app!.close();
+
+  page = await launch(false, profile);
+  await expect(page.getByRole('button', { name: 'Manage Restricted search' })).toBeVisible();
+  await expect(page.getByLabel('Search range').locator('option')).toHaveCount(1);
+  await expect(page.getByLabel('Name match').locator('option')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Manage Restricted search' }).click();
+  await page.getByRole('menuitem', { name: 'Edit connection' }).click();
+  dialog = page.getByRole('dialog', { name: 'Edit connection' });
+  await expect(dialog.getByRole('checkbox', { name: 'This folder' })).toBeChecked();
+  await expect(dialog.getByRole('checkbox', { name: 'Full S3 key' })).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('textbox', { name: 'Search URI across connections' }).fill('s3://desktop-fixtures/workspace/notes.txt');
+  await page.getByRole('button', { name: 'Go to URI' }).click();
+  await expect(page.getByRole('alert')).toContainText('No connection allows Full S3 key search');
 });
