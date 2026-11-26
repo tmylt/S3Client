@@ -55,7 +55,7 @@ function registerIPC(store: ConnectionStore, worker: S3Worker, operations: Opera
   const service = new TransferService(store, operations, app.getPath('userData'), {
     changed: snapshot => { if (window && !window.isDestroyed()) window.webContents.send('s3:transfers-changed', snapshot); },
     storageChanged: async id => {
-      await cache.invalidate(id).catch(() => undefined);
+      await listings.invalidate(id).catch(() => undefined);
       if (window && !window.isDestroyed()) window.webContents.send('s3:storage-changed', id);
     },
   });
@@ -85,7 +85,7 @@ function registerIPC(store: ConnectionStore, worker: S3Worker, operations: Opera
     video.closeConnection(id);
     return true;
   });
-  handle('s3:list', (id, prefix, pageSize, continuationToken, pageIndex) => listings.list(id, prefix, pageSize, continuationToken, pageIndex));
+  handle('s3:list', (id, prefix, pageSize, continuationToken, pageIndex, fresh) => listings.list(id, prefix, pageSize, continuationToken, pageIndex, fresh));
   handle('s3:search', (id, prefix, range, match, name, pageSize, continuationToken) => listings.search(id, prefix, range, match, name, pageSize, continuationToken));
   handle('s3:search-uri', (id, key) => listings.searchUri(id, key));
   handle('s3:stats', (id, prefix) => listings.stats(id, prefix));
@@ -100,7 +100,7 @@ function registerIPC(store: ConnectionStore, worker: S3Worker, operations: Opera
   handle('s3:delete-stats-history-point', async (id, prefix, value) => {
     const point = parseFolderStats(value);
     const { points, connection, target } = await historyContext(id, prefix);
-    if (!points.some(item => item.updatedAt === point.updatedAt && item.fileCount === point.fileCount && item.totalSize === point.totalSize && item.durationMs === point.durationMs)) throw new Error('This scan result no longer exists.');
+    if (!points.some(item => item.updatedAt === point.updatedAt && item.fileCount === point.fileCount && item.totalSize === point.totalSize && item.durationMs === point.durationMs && item.latestModified === point.latestModified)) throw new Error('This scan result no longer exists.');
     if (!await confirmations.ask({ kind: 'stats-point', name: new Date(point.updatedAt).toLocaleString(), path: storageUri(connection, target) })) return null;
     return listings.deleteStatsHistoryPoint(id, target, point);
   });

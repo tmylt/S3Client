@@ -6,7 +6,14 @@ export function parseFolderStats(value: unknown): FolderStats {
   const stats = value as FolderStats;
   for (const number of [stats.fileCount, stats.totalSize, stats.durationMs]) if (!Number.isSafeInteger(number) || number < 0) throw invalid();
   if (typeof stats.updatedAt !== 'string' || stats.updatedAt.length > 200 || !Number.isFinite(Date.parse(stats.updatedAt))) throw invalid();
-  return { fileCount: stats.fileCount, totalSize: stats.totalSize, updatedAt: stats.updatedAt, durationMs: stats.durationMs };
+  const latestModified = stats.latestModified;
+  if (latestModified !== undefined && latestModified !== null && (typeof latestModified !== 'string' || latestModified.length > 200 || !Number.isFinite(Date.parse(latestModified)))) throw invalid();
+  return { fileCount: stats.fileCount, totalSize: stats.totalSize, updatedAt: stats.updatedAt, durationMs: stats.durationMs,
+    ...(latestModified === undefined ? {} : { latestModified }) };
+}
+
+export function entryModified(entry: Entry): string | null {
+  return entry.kind === 'folder' ? entry.stats?.latestModified ?? null : entry.modified;
 }
 
 export function mergeEntryStats(entries: Entry[], previous: Entry[]): Entry[] {

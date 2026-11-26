@@ -51,7 +51,7 @@ describe('folder statistics history', () => {
     const path = await directory();
     const history = new FolderStatsHistoryStore(path, () => now);
     const first = snapshot('2026-11-12T10:00:00Z', 2, 100);
-    const second = snapshot('2026-11-13T10:00:00Z', 3, 150);
+    const second = { ...snapshot('2026-11-13T10:00:00Z', 3, 150), latestModified: '2026-11-13T09:00:00.000Z' };
     await history.append(scope, 'team/folder/', first);
     await history.append(scope, 'team/folder/', second);
     await history.append(scope, 'team/folder/', second);

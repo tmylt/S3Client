@@ -28,6 +28,8 @@ export function useBrowser() {
   const [history, setHistory] = useState(initialHistory);
   const [nodes, setNodes] = useState<Record<string, NodeState>>({});
   const [expanded, setExpanded] = useState(new Set<string>());
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
   const [statistics, setStatistics] = useState<Record<string, FolderStatsState>>({});
   const [sessionPageSizes, setSessionPageSizes] = useState<Record<string, number>>({});
   const sessionPageSizesRef = useRef(sessionPageSizes);
@@ -90,14 +92,14 @@ export function useBrowser() {
     return () => { active = false; };
   }, [updateConnections, updateNodes]);
 
-  const fetchPage = useCallback(async (connectionId: string, prefix: string, pageSize: number, pageIndex: number, token: string | null, resetFolders = false) => {
+  const fetchPage = useCallback(async (connectionId: string, prefix: string, pageSize: number, pageIndex: number, token: string | null, resetFolders = false, fresh = false) => {
     if (!connectionIds.current.has(connectionId)) return;
     const key = nodeKey(connectionId, prefix);
     const request = ++sequence.current;
     requests.current.set(key, request);
     updateNodes(current => ({ ...current, [key]: { ...current[key], entries: current[key]?.entries || [], loaded: current[key]?.loaded || false, loading: true, error: undefined } }));
     try {
-      const result = await window.s3.list(connectionId, prefix, pageSize, token, pageIndex);
+      const result = fresh ? await window.s3.list(connectionId, prefix, pageSize, token, pageIndex, true) : await window.s3.list(connectionId, prefix, pageSize, token, pageIndex);
       if (requests.current.get(key) !== request || !connectionIds.current.has(connectionId)) return;
       updateNodes(current => {
         const previous = current[key];
@@ -120,7 +122,7 @@ export function useBrowser() {
     const previous = nodesRef.current[nodeKey(connectionId, prefix)];
     const size = getPageSize(connectionId);
     if (!force && (previous?.loading || previous?.loaded && previous.pageSize === size)) return;
-    await fetchPage(connectionId, prefix, size, 0, null, true);
+    await fetchPage(connectionId, prefix, size, 0, null, true, force);
   }, [fetchPage, getPageSize]);
 
   const nextPage = useCallback(async (connectionId: string, prefix: string) => {
@@ -158,9 +160,27 @@ export function useBrowser() {
     try {
       const result = await window.s3.stats(id, prefix);
       if (statsRequests.current.get(key) !== ticket || !connectionIds.current.has(id)) return;
-      updateNodes(current => Object.fromEntries(Object.entries(current).map(([cacheKey, node]) => [cacheKey, JSON.parse(cacheKey)[0] !== id ? node : {
-        ...node, entries: node.entries.map(entry => entry.kind === 'folder' && entry.key === prefix ? { ...entry, stats: result } : entry),
-      }])));
+      const refresh = new Set<string>();
+      for (const cacheKey of expandedRef.current) {
+        const [connectionId, folder] = JSON.parse(cacheKey) as [string, string];
+        if (connectionId === id && folder.startsWith(prefix) && nodesRef.current[cacheKey]?.loaded) refresh.add(folder);
+      }
+      const selected = locationRef.current;
+      if (selected?.connectionId === id && selected.prefix.startsWith(prefix)) refresh.add(selected.prefix);
+      for (const cacheKey of requests.current.keys()) {
+        const [connectionId, folder] = JSON.parse(cacheKey) as [string, string];
+        if (connectionId === id && folder.startsWith(prefix)) requests.current.delete(cacheKey);
+      }
+      updateNodes(current => Object.fromEntries(Object.entries(current).flatMap(([cacheKey, node]) => {
+        const [connectionId, folder] = JSON.parse(cacheKey) as [string, string];
+        if (connectionId !== id) return [[cacheKey, node]];
+        if (folder.startsWith(prefix)) return [];
+        return [[cacheKey, {
+          ...node, entries: node.entries.map(entry => entry.kind === 'folder' && entry.key === prefix ? { ...entry, stats: result } : entry),
+          folders: node.folders?.map(entry => entry.kind === 'folder' && entry.key === prefix ? { ...entry, stats: result } : entry),
+        }]];
+      })));
+      await Promise.all([...refresh].map(folder => fetchPage(id, folder, getPageSize(id), 0, null, true)));
       setStatistics(current => ({ ...current, [key]: { loading: false } }));
       return result;
     } catch (error) {
@@ -169,7 +189,7 @@ export function useBrowser() {
     } finally {
       if (statsRequests.current.get(key) === ticket) statsRequests.current.delete(key);
     }
-  }, [updateNodes]);
+  }, [fetchPage, getPageSize, updateNodes]);
 
   useEffect(() => {
     if (!location) return;

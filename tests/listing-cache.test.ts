@@ -19,7 +19,7 @@ describe('ListingCache', () => {
     const path = await directory();
     const cache = new ListingCache(path);
     const folder: Entry = { key: 'team/folder/', name: 'folder', kind: 'folder', size: null, modified: null };
-    const stats = { fileCount: 2, totalSize: 4096, updatedAt: '2026-10-29T10:00:00Z', durationMs: 1200 };
+    const stats = { fileCount: 2, totalSize: 4096, latestModified: '2026-10-28T09:00:00.000Z', updatedAt: '2026-10-29T10:00:00Z', durationMs: 1200 };
     await cache.put(scope, scope.prefix, { entries: [folder] }, 0);
     await cache.putStats(scope, folder.key, stats, 0);
     await cache.put(scope, scope.prefix, { entries: [folder] }, 0);

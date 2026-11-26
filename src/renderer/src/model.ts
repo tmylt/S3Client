@@ -1,6 +1,7 @@
 import type { Entry } from '../../shared/types';
 import type { SearchMatch } from '../../shared/types';
 import { compileSearchRegex } from '../../shared/search-regex';
+import { entryModified } from '../../shared/folder-stats';
 
 export interface Location { connectionId: string; prefix: string }
 export interface History { entries: Location[]; index: number }
@@ -45,13 +46,21 @@ export function getVisibleEntries(entries: Entry[], query: string, column: SortC
     catch { return []; }
   }
   return entries.filter(entry => !query || (match === 'exact' ? entry.name === query : match === 'prefix' ? entry.name.startsWith(query) : match === 'regex' ? regex!.test(entry.name) : entry.name.toLocaleLowerCase().includes(filter))).sort((a, b) => {
-    if (column === 'size' || column === 'modified') {
+    if (column === 'size') {
       if (a.kind !== b.kind) return a.kind === 'folder' ? 1 : -1;
       if (a.kind === 'folder') return collator.compare(a.name, b.name);
     }
+    if (column === 'modified') {
+      const left = entryModified(a), right = entryModified(b);
+      if (!left || !right) {
+        if (Boolean(left) !== Boolean(right)) return left ? -1 : 1;
+        if (a.kind !== b.kind) return a.kind === 'folder' ? 1 : -1;
+        return collator.compare(a.name, b.name);
+      }
+      return (left.localeCompare(right) || collator.compare(a.name, b.name)) * (direction === 'asc' ? 1 : -1);
+    }
     let order = 0;
     if (column === 'size') order = (a.size ?? -1) - (b.size ?? -1);
-    else if (column === 'modified') order = (a.modified ?? '').localeCompare(b.modified ?? '');
     else if (column === 'kind') order = collator.compare(fileKind(a), fileKind(b));
     return (order || collator.compare(a.name, b.name)) * (direction === 'asc' ? 1 : -1);
   });

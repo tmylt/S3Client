@@ -52,6 +52,7 @@ export interface FolderStats {
   totalSize: number;
   updatedAt: string;
   durationMs: number;
+  latestModified?: string | null;
 }
 
 export interface Entry {
@@ -104,7 +105,7 @@ export interface S3API {
   copyConnection(id: string): Promise<Connection>;
   reorderConnections(ids: string[]): Promise<void>;
   removeConnection(id: string): Promise<boolean>;
-  list(connectionId: string, prefix: string, pageSize?: number, continuationToken?: string | null, pageIndex?: number): Promise<Listing>;
+  list(connectionId: string, prefix: string, pageSize?: number, continuationToken?: string | null, pageIndex?: number, fresh?: boolean): Promise<Listing>;
   search(connectionId: string, prefix: string, range: RemoteSearchRange, match: SearchMatch, name: string, pageSize?: number, continuationToken?: string | null): Promise<Listing>;
   searchUri(connectionId: string, key: string): Promise<Listing>;
   stats(connectionId: string, prefix: string): Promise<FolderStats>;

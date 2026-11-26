@@ -36,7 +36,7 @@ function scope(value: unknown): CacheScope {
 const scopeKey = (connection: CacheScope) => JSON.stringify([connection.id, connection.endpoint, connection.bucket, connection.prefix, connection.configHash ?? '']);
 const recordKey = (connection: CacheScope, prefix: string) => JSON.stringify([scopeKey(connection), prefix]);
 const stamp = (value: FolderStats) => Date.parse(value.updatedAt);
-const samePoint = (left: FolderStats, right: FolderStats) => left.updatedAt === right.updatedAt && left.fileCount === right.fileCount && left.totalSize === right.totalSize && left.durationMs === right.durationMs;
+const samePoint = (left: FolderStats, right: FolderStats) => left.updatedAt === right.updatedAt && left.fileCount === right.fileCount && left.totalSize === right.totalSize && left.durationMs === right.durationMs && left.latestModified === right.latestModified;
 function record(value: unknown): StoredHistory {
   const input = object(value);
   const connection = scope(input.connection), prefix = directory(input.prefix);

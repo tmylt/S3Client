@@ -9,9 +9,11 @@ describe('folder statistics metadata', () => {
   it('accepts complete and empty scan results and strips extras', () => {
     expect(parseFolderStats({ ...stats, ignored: 'private' })).toEqual(stats);
     expect(parseFolderStats({ ...stats, fileCount: 0, totalSize: 0, durationMs: 0 })).toMatchObject({ fileCount: 0, totalSize: 0 });
+    expect(parseFolderStats({ ...stats, latestModified: '2026-10-28T09:00:00.000Z' })).toEqual({ ...stats, latestModified: '2026-10-28T09:00:00.000Z' });
+    expect(parseFolderStats({ ...stats, latestModified: null })).toEqual({ ...stats, latestModified: null });
   });
   it('rejects invalid and imprecise counts or timestamps', () => {
-    for (const invalid of [{ fileCount: -1 }, { totalSize: Infinity }, { fileCount: 1.2 }, { totalSize: Number.MAX_SAFE_INTEGER + 1 }, { updatedAt: 'invalid' }, { durationMs: -1 }]) {
+    for (const invalid of [{ fileCount: -1 }, { totalSize: Infinity }, { fileCount: 1.2 }, { totalSize: Number.MAX_SAFE_INTEGER + 1 }, { updatedAt: 'invalid' }, { durationMs: -1 }, { latestModified: 'invalid' }, { latestModified: 123 }]) {
       expect(() => parseFolderStats({ ...stats, ...invalid })).toThrow(/statistics/i);
     }
   });

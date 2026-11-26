@@ -8,11 +8,12 @@ import { isSearchAllowed, normalizeSearchOptions } from '../shared/search-option
 import { ConnectionStore, validatePrefix, type WorkerConnection } from './connections';
 import { ListingCache, type CacheScope } from './listing-cache';
 import { FolderStatsHistoryStore } from './folder-stats-history';
+import { ScanSnapshot, type ScannedObject } from './scan-snapshot';
 
 interface Worker {
   list(connection: WorkerConnection, prefix: string, pageSize: number, continuationToken: string | null): Promise<Listing>;
   search(connection: WorkerConnection, prefix: string, range: RemoteSearchRange, match: SearchMatch, name: string, pageSize: number, continuationToken: string | null): Promise<Listing>;
-  stats(connection: WorkerConnection, prefix: string): Promise<FolderStats>;
+  stats(connection: WorkerConnection, prefix: string): Promise<FolderStats & { objects?: ScannedObject[] | null }>;
 }
 
 function cacheScope(connection: Pick<Connection, 'id' | 'endpoint' | 'bucket' | 'prefix' | 'extraConfig'>): CacheScope {
@@ -27,6 +28,7 @@ function cacheScope(connection: Pick<Connection, 'id' | 'endpoint' | 'bucket' | 
 export class ListingService {
   private sequence = 0;
   private readonly requests = new Map<string, number>();
+  private readonly snapshots = new Map<string, Map<string, { snapshot: ScanSnapshot; scope: string; ticket: number }>>();
   constructor(private readonly store: ConnectionStore, private readonly cache: ListingCache, private readonly worker: Worker, private readonly history: FolderStatsHistoryStore) {}
 
   private async cachedStats(connection: CacheScope, prefix: string): Promise<FolderStats | undefined> {
@@ -70,19 +72,28 @@ export class ListingService {
     return { ...settings, cachedListings: [...firstPages.values()] };
   }
 
-  async list(id: unknown, prefix: unknown, pageSize: unknown = 1000, continuationToken: unknown = null, pageIndex: unknown = 0): Promise<Listing> {
+  async list(id: unknown, prefix: unknown, pageSize: unknown = 1000, continuationToken: unknown = null, pageIndex: unknown = 0, fresh: unknown = false): Promise<Listing> {
     if (typeof pageSize !== 'number' || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000 ||
       typeof pageIndex !== 'number' || !Number.isSafeInteger(pageIndex) || pageIndex < 0 || pageIndex > 1_000_000 ||
       (continuationToken !== null && (typeof continuationToken !== 'string' || !continuationToken || continuationToken.length > 8192)) ||
-      (pageIndex === 0) !== (continuationToken === null)) throw new Error('Invalid listing page.');
+      (pageIndex === 0) !== (continuationToken === null) || typeof fresh !== 'boolean') throw new Error('Invalid listing page.');
     const generation = typeof id === 'string' ? this.cache.version(id) : 0;
     const request = await this.store.forListing(id, prefix);
+    const scope = cacheScope({ id: id as string, ...request.connection });
+    const scopeId = JSON.stringify(scope);
+    if (fresh) this.snapshots.get(id as string)?.forEach((item, root) => {
+      if (request.prefix.startsWith(root) || root.startsWith(request.prefix)) this.snapshots.get(id as string)?.delete(root);
+    });
+    const snapshot = [...(this.snapshots.get(id as string)?.values() ?? [])]
+      .filter(item => item.scope === scopeId && request.prefix.startsWith(item.snapshot.root) && item.snapshot.has(request.prefix))
+      .sort((a, b) => b.ticket - a.ticket)[0]?.snapshot;
+    if (!fresh && snapshot) return snapshot.page(request.prefix, pageSize, pageIndex, continuationToken);
+    if (typeof continuationToken === 'string' && continuationToken.startsWith('scan:')) throw new Error('The scanned listing page has expired. Refresh this folder.');
     const key = JSON.stringify([id, request.prefix]);
     const ticket = ++this.sequence;
     this.requests.set(key, ticket);
     try {
       const listing = await this.worker.list(request.connection, request.prefix, pageSize, continuationToken);
-      const scope = cacheScope({ id: id as string, ...request.connection });
       const previous = await this.cache.all([scope]).catch(() => []);
       const result = { entries: mergeEntryStats(listing.entries, previous.flatMap(item => item.entries)), ...(listing.nextToken === undefined ? {} : { nextToken: listing.nextToken }) };
       if (this.requests.get(key) === ticket) {
@@ -101,13 +112,33 @@ export class ListingService {
     const ticket = ++this.sequence;
     this.requests.set(key, ticket);
     try {
-      const result = await this.worker.stats(request.connection, request.prefix);
+      const scanned = await this.worker.stats(request.connection, request.prefix);
+      const { fileCount, totalSize, updatedAt, durationMs, latestModified } = scanned;
+      const result: FolderStats = { fileCount, totalSize, updatedAt, durationMs, ...(latestModified === undefined ? {} : { latestModified }) };
       if (this.requests.get(key) === ticket && this.cache.version(id as string) === generation) {
         const connection = cacheScope({ id: id as string, ...request.connection });
         await this.statsHistory(id, request.prefix).catch(() => undefined);
         if (this.requests.get(key) === ticket && this.cache.version(id as string) === generation) {
           await this.history.append(connection, request.prefix, result).catch(() => undefined);
-          await this.cache.putStats(connection, request.prefix, result, generation).catch(() => undefined);
+          if (this.requests.get(key) === ticket && this.cache.version(id as string) === generation) {
+            for (const listingKey of this.requests.keys()) {
+              const parts = JSON.parse(listingKey) as string[];
+              if (parts.length === 2 && parts[0] === id && parts[1].startsWith(request.prefix)) this.requests.delete(listingKey);
+            }
+            await this.cache.invalidatePrefix(connection, request.prefix).catch(() => undefined);
+            if (this.requests.get(key) === ticket && this.cache.version(id as string) === generation) {
+              await this.cache.putStats(connection, request.prefix, result, generation).catch(() => undefined);
+              if (this.requests.get(key) === ticket && this.cache.version(id as string) === generation) {
+                const byRoot = this.snapshots.get(id as string) ?? new Map();
+                for (const [root, item] of byRoot) {
+                  if (item.ticket <= ticket && (root.startsWith(request.prefix) || request.prefix.startsWith(root))) byRoot.delete(root);
+                }
+                if (scanned.objects) byRoot.set(request.prefix, { snapshot: new ScanSnapshot(request.prefix, scanned.objects, result), scope: JSON.stringify(connection), ticket });
+                while (byRoot.size > 4) byRoot.delete(byRoot.keys().next().value!);
+                this.snapshots.set(id as string, byRoot);
+              }
+            }
+          }
         }
       }
       return result;
@@ -143,6 +174,7 @@ export class ListingService {
   async save(input: unknown): Promise<Connection> {
     const connection = await this.store.save(input);
     await this.cache.invalidate(connection.id).catch(() => undefined);
+    this.snapshots.delete(connection.id);
     return connection;
   }
 
@@ -150,7 +182,13 @@ export class ListingService {
     await this.store.remove(id);
     if (typeof id === 'string') {
       await this.cache.invalidate(id).catch(() => undefined);
+      this.snapshots.delete(id);
       await this.history.removeConnection(id).catch(() => undefined);
     }
+  }
+
+  async invalidate(id: string): Promise<void> {
+    this.snapshots.delete(id);
+    await this.cache.invalidate(id);
   }
 }

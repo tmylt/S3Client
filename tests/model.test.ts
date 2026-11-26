@@ -63,6 +63,16 @@ describe('file list', () => {
     expect(getVisibleEntries(entries, 'FILE2', 'name', 'asc', 'exact')).toEqual([]);
     expect(entries[0].name).toBe('file10.txt');
   });
+  it('sorts scanned folders by their latest file modification and leaves unscanned folders last', () => {
+    const entries: Entry[] = [
+      { ...file('unscanned/'), kind: 'folder', modified: null },
+      { ...file('scanned/'), kind: 'folder', modified: null, stats: { fileCount: 1, totalSize: 1, updatedAt: '2026-01-10T00:00:00Z', durationMs: 1, latestModified: '2026-01-02T00:00:00Z' } },
+      { ...file('older.txt'), modified: '2026-01-01T00:00:00Z' },
+      { ...file('newer.txt'), modified: '2026-01-03T00:00:00Z' },
+    ];
+    expect(getVisibleEntries(entries, '', 'modified', 'asc').map(item => item.name)).toEqual(['older.txt', 'scanned/', 'newer.txt', 'unscanned/']);
+    expect(getVisibleEntries(entries, '', 'modified', 'desc').map(item => item.name)).toEqual(['newer.txt', 'scanned/', 'older.txt', 'unscanned/']);
+  });
 
   it('matches JavaScript regex patterns against names on the loaded page', () => {
     const entries = [file('report-1.csv'), file('report-2.CSV'), file('report-10.csv'), file('notes.csv')];

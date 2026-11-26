@@ -602,12 +602,13 @@ describe('folder row statistics', () => {
 
   it('calculates recursively on demand, displays size/count/time, and retains results during a list refresh', async () => {
     const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null };
-    const stats = { fileCount: 3, totalSize: 4096, updatedAt: '2026-10-29T10:00:00Z', durationMs: 1250 };
+    const stats = { fileCount: 3, totalSize: 4096, latestModified: '2026-10-28T08:30:00.000Z', updatedAt: '2026-10-29T10:00:00Z', durationMs: 1250 };
     const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [folder], updatedAt: stats.updatedAt }]);
     const pending = deferred<typeof stats>(); bridge.stats.mockReturnValue(pending.promise);
     bridge.list.mockResolvedValue({ entries: [folder] });
     render(createElement(App));
     const button = await screen.findByRole('button', { name: 'Refresh statistics for directory' });
+    expect(within(screen.getByRole('row', { name: /directory/ })).getAllByRole('cell')[2].textContent).toBe('—');
     expect(bridge.stats).not.toHaveBeenCalled();
     button.focus(); fireEvent.keyDown(button, { key: 'f', ctrlKey: true });
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search file name' }));
@@ -617,6 +618,7 @@ describe('folder row statistics', () => {
     expect(bridge.list).not.toHaveBeenCalled();
     await act(async () => { pending.resolve(stats); await pending.promise; });
     const row = screen.getByRole('row', { name: /directory/ });
+    expect(within(row).getAllByRole('cell')[2].textContent).toBe(formatDate(stats.latestModified, true));
     expect(within(row).getByText('4 KB')).toBeTruthy();
     expect(within(row).getByText('3')).toBeTruthy();
     expect(within(row).getByText(formatDate(stats.updatedAt, true))).toBeTruthy();
@@ -634,6 +636,37 @@ describe('folder row statistics', () => {
     await screen.findByText('Stats failed');
     expect(screen.getByRole('row', { name: /directory/ }).textContent).toContain('2 KB');
     expect(screen.getByRole('row', { name: /directory/ }).textContent).toContain(formatDate(stats.updatedAt, true));
+  });
+  it('reopens a previously visited folder with fresh contents after its statistics scan', async () => {
+    const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null };
+    const old: Entry = { key: 'directory/old.txt', name: 'old.txt', kind: 'file', size: 1, modified: null };
+    const fresh: Entry = { key: 'directory/new.txt', name: 'new.txt', kind: 'file', size: 2, modified: null };
+    const bridge = api([connection('a')], [
+      { connectionId: 'a', prefix: '', entries: [folder], updatedAt: '2026-01-01T00:00:00Z' },
+      { connectionId: 'a', prefix: folder.key, entries: [old], updatedAt: '2026-01-01T00:00:00Z' },
+    ]);
+    bridge.stats.mockResolvedValue({ fileCount: 1, totalSize: 2, updatedAt: new Date().toISOString(), durationMs: 1 });
+    bridge.list.mockResolvedValue({ entries: [fresh], nextToken: null });
+    const { result } = renderHook(useBrowser);
+    await waitFor(() => expect(result.current.initializing).toBe(false));
+    await act(async () => { await result.current.scanStats('a', folder.key); });
+    await act(async () => { result.current.navigate({ connectionId: 'a', prefix: folder.key }); });
+    await waitFor(() => expect(result.current.nodes[nodeKey('a', folder.key)]?.entries).toEqual([fresh]));
+    expect(bridge.list).toHaveBeenCalledWith('a', folder.key, 1000, null, 0);
+  });
+  it('refreshes an expanded subtree after its statistics scan', async () => {
+    const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null };
+    const old: Entry = { key: 'directory/old.txt', name: 'old.txt', kind: 'file', size: 1, modified: null };
+    const fresh: Entry = { key: 'directory/new.txt', name: 'new.txt', kind: 'file', size: 2, modified: null };
+    const bridge = api([connection('a')], [{ connectionId: 'a', prefix: '', entries: [folder], updatedAt: '2026-01-01T00:00:00Z' }]);
+    bridge.list.mockResolvedValueOnce({ entries: [old] }).mockResolvedValueOnce({ entries: [fresh] });
+    bridge.stats.mockResolvedValue({ fileCount: 1, totalSize: 2, updatedAt: new Date().toISOString(), durationMs: 1 });
+    const { result } = renderHook(useBrowser);
+    await waitFor(() => expect(result.current.initializing).toBe(false));
+    await act(async () => { result.current.toggle('a', folder.key); });
+    await waitFor(() => expect(result.current.nodes[nodeKey('a', folder.key)]?.entries).toEqual([old]));
+    await act(async () => { await result.current.scanStats('a', folder.key); });
+    expect(result.current.nodes[nodeKey('a', folder.key)]?.entries).toEqual([fresh]);
   });
   it.each(['save', 'remove'] as const)('ignores a pending row scan after connection %s', async mutation => {
     const folder: Entry = { key: 'directory/', name: 'directory', kind: 'folder', size: null, modified: null };
@@ -863,7 +896,7 @@ describe('browser asynchronous state', () => {
     expect(bridge.copyConnection).toHaveBeenCalledWith(source.id);
     expect(result.current.connections).toEqual([source, copied]);
     expect(result.current.location).toEqual({ connectionId: copied.id, prefix: copied.prefix });
-    expect(bridge.list).toHaveBeenCalledWith(copied.id, copied.prefix, 1000, null, 0);
+    expect(bridge.list).toHaveBeenCalledWith(copied.id, copied.prefix, 1000, null, 0, true);
     act(() => result.current.back());
     expect(result.current.location).toEqual({ connectionId: source.id, prefix: source.prefix });
   });

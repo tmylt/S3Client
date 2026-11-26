@@ -28,16 +28,16 @@ async function fixture() {
       return;
     }
     const objects = [
-      { key: 'root/a%2Bb.txt', size: 2 },
-      { key: 'root/sub%20dir/file.txt', size: 5 },
-      { key: 'root/sub%20dir/', size: 0 },
+      { key: 'root/a%2Bb.txt', size: 2, modified: '2026-01-02T03:04:05.000Z' },
+      { key: 'root/sub%20dir/file.txt', size: 5, modified: '2026-01-05T03:04:05.000Z' },
+      { key: 'root/sub%20dir/', size: 0, modified: '2026-02-01T03:04:05.000Z' },
     ].filter(item => decodeURIComponent(item.key).startsWith(prefix));
     const content = delimiter ? objects.filter(item => !decodeURIComponent(item.key).slice(prefix.length).includes('/')) : objects;
     const prefixes = token && delimiter && objects.some(item => decodeURIComponent(item.key).startsWith(`${prefix}sub dir/`))
       ? '<CommonPrefixes><Prefix>root/sub%20dir/</Prefix></CommonPrefixes>' : '';
     const page = token ? content.slice(1) : content.slice(0, 1);
     const truncated = !token && objects.length > 1;
-    response.end(`<ListBucketResult><IsTruncated>${truncated}</IsTruncated>${truncated ? '<NextContinuationToken>next</NextContinuationToken>' : ''}${prefixes}${page.map(item => `<Contents><Key>${item.key}</Key><Size>${item.size}</Size><LastModified>2026-01-02T03:04:05.000Z</LastModified></Contents>`).join('')}</ListBucketResult>`);
+    response.end(`<ListBucketResult><IsTruncated>${truncated}</IsTruncated>${truncated ? '<NextContinuationToken>next</NextContinuationToken>' : ''}${prefixes}${page.map(item => `<Contents><Key>${item.key}</Key><Size>${item.size}</Size><LastModified>${item.modified}</LastModified></Contents>`).join('')}</ListBucketResult>`);
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');
@@ -69,6 +69,11 @@ describe('native S3 listing', () => {
     const stats = await worker.stats(connection, 'root/');
     expect(stats.fileCount).toBe(2);
     expect(stats.totalSize).toBe(7);
+    expect(stats.latestModified).toBe('2026-01-05T03:04:05.000Z');
+    expect(stats.objects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'root/a+b.txt', size: 2, modified: '2026-01-02T03:04:05.000Z' }),
+      expect.objectContaining({ key: 'root/sub dir/file.txt', size: 5 }),
+    ]));
     expect(requests.every(request => request.searchParams.get('list-type') === '2')).toBe(true);
   });
 

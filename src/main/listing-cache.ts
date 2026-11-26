@@ -220,4 +220,15 @@ export class ListingCache {
       await this.persist(this.records);
     });
   }
+
+  invalidatePrefix(connection: CacheScope, prefix: string): Promise<void> {
+    const target = directory(prefix);
+    const currentScope = scope(connection);
+    if (!target.startsWith(currentScope.prefix)) throw new Error('Invalid cache prefix containment.');
+    return this.serial(async () => {
+      const next = this.records.filter(item => scopeKey(item.connection) !== scopeKey(currentScope) || !item.prefix.startsWith(target));
+      await this.persist(next);
+      this.records = next;
+    });
+  }
 }

@@ -3,9 +3,11 @@ import type { Entry, FolderStats, Listing, RemoteSearchRange, SearchMatch } from
 import type { WorkerConnection } from './connections';
 import { assertPrefix, connectionRoot, createS3Client, decodeKey, safeS3Error } from './s3-client';
 import { compileSearchRegex } from '../shared/search-regex';
+import type { ScannedObject } from './scan-snapshot';
 
 const maxActiveStats = 4;
 const statsBusyMessage = 'Four folder statistics scans are already running. Wait for one to finish, then refresh this row.';
+const maxScanMetadataBytes = 16 * 1024 * 1024;
 const validPage = (value: number) => Number.isInteger(value) && value >= 1 && value <= 1000;
 const validToken = (value: string | null) => value === null || !!value && value.length <= 8192 && !value.includes('\0');
 const matches = (candidate: string, name: string, match: SearchMatch, regex: RegExp | null) => match === 'exact' ? candidate === name : match === 'prefix' ? candidate.startsWith(name) : match === 'regex' ? regex!.test(candidate) : candidate.includes(name);
@@ -69,7 +71,7 @@ export class S3Worker {
     finally { client.destroy(); this.finish(request); }
   }
 
-  async stats(connection: WorkerConnection, prefix: string): Promise<FolderStats> {
+  async stats(connection: WorkerConnection, prefix: string): Promise<FolderStats & { objects: ScannedObject[] | null }> {
     assertPrefix(connection, prefix);
     if (this.activeStats >= maxActiveStats) throw new Error(statsBusyMessage);
     this.activeStats++;
@@ -80,21 +82,39 @@ export class S3Worker {
       try {
         let token: string | undefined;
         let fileCount = 0, totalSize = 0;
+        let latestModified: string | null = null;
+        let objects: ScannedObject[] | null = [];
+        let metadataBytes = 0;
         do {
           if (performance.now() - started > 600_000) throw new Error('Folder statistics timed out.');
           const page = await client.send(new ListObjectsV2Command({ Bucket: connection.bucket, Prefix: prefix, EncodingType: 'url', ContinuationToken: token }), { abortSignal: request.controller.signal });
           for (const item of page.Contents ?? []) {
             if (!item.Key) continue;
             const key = decodeKey(item.Key);
-            if (!key.startsWith(prefix) || key.endsWith('/')) continue;
+            if (!key.startsWith(prefix)) continue;
+            if (key.endsWith('/')) {
+              if (objects) {
+                metadataBytes += Buffer.byteLength(key) + 128;
+                if (metadataBytes > maxScanMetadataBytes || key.length > 8192) objects = null;
+                else objects.push({ key, size: 0, modified: null });
+              }
+              continue;
+            }
             const size = item.Size ?? 0;
             if (!Number.isSafeInteger(size) || size < 0 || !Number.isSafeInteger(totalSize + size)) throw new Error('Folder statistics contain invalid object sizes.');
             totalSize += size; fileCount++;
+            const modified = item.LastModified?.toISOString() ?? null;
+            if (modified && (!latestModified || modified > latestModified)) latestModified = modified;
+            if (objects) {
+              metadataBytes += Buffer.byteLength(key) + 128 + Buffer.byteLength(item.StorageClass ?? '');
+              if (metadataBytes > maxScanMetadataBytes || key.length > 8192) objects = null;
+              else objects.push({ key, size, modified, ...(item.StorageClass ? { storageClass: item.StorageClass } : {}) });
+            }
           }
           token = page.IsTruncated ? page.NextContinuationToken : undefined;
           if (page.IsTruncated && !token) throw new Error('The storage service returned an invalid continuation token.');
         } while (token);
-        return { fileCount, totalSize, updatedAt: new Date().toISOString(), durationMs: Math.max(0, Math.floor(performance.now() - started)) };
+        return { fileCount, totalSize, latestModified, updatedAt: new Date().toISOString(), durationMs: Math.max(0, Math.floor(performance.now() - started)), objects };
       } finally { client.destroy(); }
     } catch (error) { throw this.disposed ? new Error('The S3 worker has stopped.') : safeS3Error(error); }
     finally { this.activeStats--; this.finish(request); }

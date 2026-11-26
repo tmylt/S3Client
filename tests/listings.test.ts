@@ -72,8 +72,8 @@ describe('persistent listing service', () => {
   });
   it('keeps an existing cached scan and each new scan in folder history', async () => {
     const { service, saved, cache, worker } = await setup();
-    const old = { fileCount: 2, totalSize: 100, updatedAt: new Date(Date.now() - 60_000).toISOString(), durationMs: 50 };
-    const latest = { fileCount: 3, totalSize: 150, updatedAt: new Date().toISOString(), durationMs: 60 };
+    const old = { fileCount: 2, totalSize: 100, latestModified: '2026-10-28T10:00:00.000Z', updatedAt: new Date(Date.now() - 60_000).toISOString(), durationMs: 50 };
+    const latest = { fileCount: 3, totalSize: 150, latestModified: '2026-10-27T10:00:00.000Z', updatedAt: new Date().toISOString(), durationMs: 60 };
     const folder = { key: 'root/folder/', name: 'folder', kind: 'folder' as const, size: null, modified: null, stats: old };
     await cache.put(saved, saved.prefix, { entries: [folder] }, cache.version(saved.id));
     expect(await service.statsHistory(saved.id, folder.key)).toEqual([old]);
@@ -157,6 +157,70 @@ describe('persistent listing service', () => {
     expect(worker.stats).toHaveBeenCalledWith(expect.objectContaining({ bucket: saved.bucket }), folder.key);
     expect((await service.connections()).cachedListings[0].entries[0].stats).toEqual(stats);
     expect((await service.list(saved.id, saved.prefix)).entries[0].stats).toEqual(stats);
+  });
+  it('serves scanned descendant metadata in pages and discards stale saved pages', async () => {
+    const { service, saved, worker, cache } = await setup();
+    const target = 'root/folder/';
+    const old = { key: `${target}old.txt`, name: 'old.txt', kind: 'file' as const, size: 1, modified: null };
+    await cache.put(saved, target, { entries: [old] }, cache.version(saved.id));
+    await cache.put(saved, `${target}nested/`, { entries: [{ ...old, key: `${target}nested/old.txt` }] }, cache.version(saved.id));
+    const stats = { fileCount: 3, totalSize: 12, updatedAt: new Date().toISOString(), durationMs: 1 };
+    const objects = [
+      { key: `${target}a.txt`, name: 'a.txt', kind: 'file' as const, size: 2, modified: '2026-11-26T01:02:03.000Z' },
+      { key: `${target}nested/deep.txt`, name: 'deep.txt', kind: 'file' as const, size: 4, modified: '2026-11-26T01:02:04.000Z' },
+      { key: `${target}z.txt`, name: 'z.txt', kind: 'file' as const, size: 6, modified: '2026-11-26T01:02:05.000Z' },
+    ];
+    worker.stats.mockResolvedValue({ ...stats, objects });
+    expect(await service.stats(saved.id, target)).toEqual(stats);
+    const first = await service.list(saved.id, target, 2);
+    expect(first.entries.map(item => item.key)).toEqual([objects[0].key, `${target}nested/`]);
+    expect(first.nextToken).toEqual(expect.any(String));
+    const second = await service.list(saved.id, target, 2, first.nextToken, 1);
+    expect(second.entries.map(item => item.key)).toEqual([objects[2].key]);
+    expect((await service.list(saved.id, `${target}nested/`)).entries).toEqual([objects[1]]);
+    expect(worker.list).not.toHaveBeenCalled();
+    expect((await cache.all([saved])).filter(item => item.prefix.startsWith(target))).toEqual([]);
+  });
+  it('calculates current counts and sizes for every subfolder from the parent scan', async () => {
+    const { service, saved, worker } = await setup();
+    const target = 'root/folder/';
+    const stats = { fileCount: 3, totalSize: 9, latestModified: '2026-11-25T15:00:00.000Z', updatedAt: '2026-11-26T01:02:03.000Z', durationMs: 25 };
+    worker.stats.mockResolvedValue({ ...stats, objects: [
+      { key: `${target}sub/a.txt`, size: 3, modified: '2026-11-25T03:00:00.000Z' },
+      { key: `${target}sub/deep/b.txt`, size: 4, modified: '2026-11-25T12:00:00.000Z' },
+      { key: `${target}new.txt`, size: 2, modified: stats.latestModified },
+      { key: `${target}empty/`, size: 0, modified: null },
+    ] });
+    await service.stats(saved.id, target);
+    const folders = (await service.list(saved.id, target)).entries.filter(item => item.kind === 'folder');
+    expect(folders).toEqual([
+      { key: `${target}empty/`, name: 'empty', kind: 'folder', size: null, modified: null, stats: { ...stats, fileCount: 0, totalSize: 0, latestModified: null } },
+      { key: `${target}sub/`, name: 'sub', kind: 'folder', size: null, modified: null, stats: { ...stats, fileCount: 2, totalSize: 7, latestModified: '2026-11-25T12:00:00.000Z' } },
+    ]);
+    const deep = (await service.list(saved.id, `${target}sub/`)).entries.find(item => item.key === `${target}sub/deep/`);
+    expect(deep?.stats).toEqual({ ...stats, fileCount: 1, totalSize: 4, latestModified: '2026-11-25T12:00:00.000Z' });
+    expect(worker.list).not.toHaveBeenCalled();
+  });
+  it('falls back to a fresh S3 page when a newer subtree scan cannot retain its metadata', async () => {
+    const { service, saved, worker } = await setup();
+    const stats = { fileCount: 1, totalSize: 2, updatedAt: new Date().toISOString(), durationMs: 1 };
+    worker.stats.mockResolvedValueOnce({ ...stats, objects: [{ key: 'root/folder/old.txt', size: 2, modified: null }] })
+      .mockResolvedValueOnce({ ...stats, objects: null });
+    await service.stats(saved.id, 'root/');
+    expect((await service.list(saved.id, 'root/folder/')).entries.map(item => item.name)).toEqual(['old.txt']);
+    await service.stats(saved.id, 'root/folder/');
+    worker.list.mockResolvedValue({ entries: [{ key: 'root/folder/new.txt', name: 'new.txt', kind: 'file', size: 3, modified: null }] });
+    expect((await service.list(saved.id, 'root/folder/')).entries.map(item => item.name)).toEqual(['new.txt']);
+    expect(worker.list).toHaveBeenCalledTimes(1);
+  });
+  it('uses S3 for an explicit refresh after a scan snapshot', async () => {
+    const { service, saved, worker } = await setup();
+    const stats = { fileCount: 1, totalSize: 2, updatedAt: new Date().toISOString(), durationMs: 1 };
+    worker.stats.mockResolvedValue({ ...stats, objects: [{ key: 'root/old.txt', size: 2, modified: null }] });
+    await service.stats(saved.id, 'root/');
+    worker.list.mockResolvedValue({ entries: [{ key: 'root/new.txt', name: 'new.txt', kind: 'file', size: 3, modified: null }] });
+    expect((await service.list(saved.id, 'root/', 1000, null, 0, true)).entries[0].name).toBe('new.txt');
+    expect(worker.list).toHaveBeenCalledTimes(1);
   });
   it('does not cache a scan that completes after its connection is edited', async () => {
     const { service, saved, worker } = await setup();

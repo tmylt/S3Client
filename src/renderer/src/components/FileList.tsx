@@ -4,7 +4,7 @@ import type { ConnectionPermissions, Entry } from '../../../shared/types';
 import { fileKind, formatBytes, formatDate, type SortColumn, type SortDirection } from '../model';
 import { EntryIcon } from './EntryIcon';
 import type { FolderStatsState, NodeState } from '../useBrowser';
-import { formatDuration } from '../../../shared/folder-stats';
+import { entryModified, formatDuration } from '../../../shared/folder-stats';
 import { fileColumns, useColumnWidths } from '../useColumnWidths';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { RowCopyMenu } from './RowCopyMenu';
@@ -82,7 +82,7 @@ export function FileList(props: Props) {
         return <tr key={entry.key} tabIndex={props.selected?.key === entry.key || (!props.selected && index === 0) ? 0 : -1} aria-selected={props.selected?.key === entry.key || props.checkedKeys.has(entry.key)} className={`${props.selected?.key === entry.key ? 'selected' : ''} ${props.checkedKeys.has(entry.key) ? 'checked' : ''} ${entry.stats ? 'has-stats' : ''}`} onClick={() => props.onSelect(entry)} onFocus={event => { if (event.target === event.currentTarget) props.onSelect(entry); }} onContextMenu={event => { event.preventDefault(); menuTrigger.current = event.currentTarget; props.onSelect(entry); setCopyMenu({ entry, x: event.clientX, y: event.clientY }); }} onDoubleClick={() => props.onOpen(entry)} onKeyDown={event => keyDown(event, entry, index)}>
           <td className="select-cell" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${entry.name || '(empty name)'}`} checked={props.checkedKeys.has(entry.key)} disabled={props.selectionDisabled} onChange={() => props.onToggleChecked(entry)} /></td>
           <td><div className="filename"><EntryIcon entry={entry} /><span title={entry.name}>{entry.name || '(empty name)'}</span>{entry.kind === 'folder' && <ChevronRight size={13} className="row-chevron" />}</div></td>
-          <td className="muted modified-cell" title={formatDate(entry.modified, true)}>{formatDate(entry.modified, true)}</td>
+          <td className="muted modified-cell" title={formatDate(entryModified(entry), true)}>{formatDate(entryModified(entry), true)}</td>
           <td className="muted size-cell" title={entry.stats ? `${entry.stats.totalSize.toLocaleString()} bytes` : undefined}>{formatBytes(entry.stats?.totalSize ?? entry.size)}</td>
           <td className="muted size-cell">{entry.stats ? entry.stats.fileCount.toLocaleString() : '—'}</td>
           <td className="muted">{fileKind(entry)}</td>

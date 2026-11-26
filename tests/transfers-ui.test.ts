@@ -377,7 +377,7 @@ describe('storage changes', () => {
     bridge.stats.mockResolvedValue({ fileCount: 1, totalSize: 100, updatedAt: '2026-01-01T00:00:00Z', durationMs: 1 });
     await act(async () => result.current.scanStats('a', 'folder/'));
     bridge.list.mockResolvedValue({ entries: [] }); changed('a');
-    await waitFor(() => expect(bridge.list).toHaveBeenCalledWith('a', '', 1000, null, 0));
+    await waitFor(() => expect(bridge.list).toHaveBeenCalledWith('a', '', 1000, null, 0, true));
     await waitFor(() => expect(result.current.nodes[nodeKey('a', '')]?.entries).toEqual([]));
     expect(result.current.statistics).toEqual({}); expect(result.current.location).toEqual({ connectionId: 'a', prefix: '' });
   });
