@@ -1,0 +1,59 @@
+name: Publish S3 Client 0.2.0 for Linux
+
+on:
+  push:
+    tags:
+      - '0.2.0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-linux:
+    if: github.repository == 'tmylt/S3Client'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: '0.2.0'
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the Linux AppImage
+        run: npm run dist -- --publish never
+
+      - name: Prepare release assets
+        run: |
+          mv 'release/S3 Client-0.2.0.AppImage' 'release/S3.Client-0.2.0.AppImage'
+          cd release
+          sha256sum 'S3.Client-0.2.0.AppImage' > 'S3.Client-0.2.0.AppImage.sha256'
+
+      - name: Publish the release and installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view 0.2.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload 0.2.0 \
+              'release/S3.Client-0.2.0.AppImage' \
+              'release/S3.Client-0.2.0.AppImage.sha256' \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create 0.2.0 \
+              'release/S3.Client-0.2.0.AppImage' \
+              'release/S3.Client-0.2.0.AppImage.sha256' \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title 'S3 Client 0.2.0' \
+              --generate-notes
+          fi
