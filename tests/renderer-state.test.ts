@@ -215,6 +215,21 @@ describe('cross-connection URI search', () => {
     expect(await screen.findByText('ap/bsfa/cds/file.txt', { selector: '.filename span' })).toBeTruthy();
     expect(screen.getByText('Using ANCESTOR')).toBeTruthy();
   });
+  it('keeps a URI search open after deleting its file result', async () => {
+    const client = { ...connection('a'), permissions: { download: true, upload: false, delete: true } };
+    const service = api([client]);
+    service.searchUri.mockResolvedValue({ entries: [file(5)] });
+    service.deleteEntry.mockResolvedValue(true);
+    render(createElement(App));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search URI across connections' }), { target: { value: 's3://bucket/report.txt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Go to URI' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete report.txt' }));
+    await waitFor(() => expect(service.deleteEntry).toHaveBeenCalledWith('a', 'report.txt', 'file'));
+    expect((screen.getByRole('textbox', { name: 'Search URI across connections' }) as HTMLInputElement).value).toBe('s3://bucket/report.txt');
+    await waitFor(() => expect(screen.queryByRole('row', { name: /report.txt/ })).toBeNull());
+    expect(screen.getByText(/0 URI results/)).toBeTruthy();
+    expect(service.searchUri).toHaveBeenCalledTimes(1);
+  });
 
   it('shows an outside-prefix folder through the closest matching connection without allowing file operations', async () => {
     const service = api([connection('less', 'ap/other/'), connection('closest', 'ap/bsfa/other/')]);
@@ -1233,7 +1248,7 @@ describe('selected object metadata', () => {
     expect(within(row).getByTitle('42 bytes')).toBeTruthy();
   });
 
-  it('clears a successful deleted file from exact search results', async () => {
+  it('keeps an exact search open after deleting its result', async () => {
     const client = { ...connection('a'), permissions: { download: true, upload: false, delete: true } };
     const bridge = api([client], [{ connectionId: 'a', prefix: '', entries: [], updatedAt: '2026-01-01T00:00:00Z' }]);
     bridge.search.mockResolvedValue({ entries: [file(5)], nextToken: null });
@@ -1243,7 +1258,33 @@ describe('selected object metadata', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Search file name' }), { target: { value: 'report.txt' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete report.txt' }));
-    await waitFor(() => expect((screen.getByRole('textbox', { name: 'Search file name' }) as HTMLInputElement).value).toBe(''));
+    await waitFor(() => expect(bridge.deleteEntry).toHaveBeenCalledWith('a', 'report.txt', 'file'));
+    expect((screen.getByRole('textbox', { name: 'Search file name' }) as HTMLInputElement).value).toBe('report.txt');
     expect(screen.queryByRole('row', { name: /report.txt/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Clear search' })).toBeTruthy();
+    expect(bridge.search).toHaveBeenCalledTimes(1);
+  });
+  it('keeps a prefix search open after a partial bulk delete and shows only failed rows', async () => {
+    const client = { ...connection('a'), permissions: { download: true, upload: false, delete: true } };
+    const bridge = api([client], [{ connectionId: 'a', prefix: '', entries: [], updatedAt: '2026-01-01T00:00:00Z' }]);
+    const first = { ...file(5), key: 'report-a.txt', name: 'report-a.txt' };
+    const failed = { ...file(7), key: 'report-b.txt', name: 'report-b.txt' };
+    bridge.search.mockResolvedValue({ entries: [first, failed], nextToken: null });
+    bridge.deleteEntries.mockResolvedValue({ succeeded: 1, failed: [{ key: failed.key, message: 'Access denied' }] });
+    render(createElement(App));
+    await screen.findByRole('heading', { name: 'This folder is empty' });
+    fireEvent.change(screen.getByLabelText('Name match'), { target: { value: 'prefix' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search file name' }), { target: { value: 'report' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    const table = await screen.findByRole('table', { name: 'Folder contents' });
+    await within(table).findByRole('checkbox', { name: 'Select report-a.txt' });
+    fireEvent.click(within(table).getByRole('checkbox', { name: 'Select all on this page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 2 selected' }));
+    await waitFor(() => expect(bridge.deleteEntries).toHaveBeenCalledTimes(1));
+    expect((screen.getByRole('textbox', { name: 'Search file name' }) as HTMLInputElement).value).toBe('report');
+    await waitFor(() => expect(within(table).queryByRole('row', { name: /report-a.txt/ })).toBeNull());
+    expect(within(table).getByRole('row', { name: /report-b.txt/ })).toBeTruthy();
+    expect(within(table).getByRole('checkbox', { name: 'Select report-b.txt' })).toHaveProperty('checked', true);
+    expect(bridge.search).toHaveBeenCalledTimes(1);
   });
 });

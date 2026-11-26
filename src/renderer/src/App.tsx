@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronLeft, ChevronRight, Cloud, Copy, Folder, Info, LoaderCircle, Plus, RefreshCw, Search, Server, Trash2, X } from 'lucide-react';
-import type { ConfirmationAnswer, ConfirmationRequest, Connection, ConnectionDetails, ConnectionInput, Entry, SearchMatch, SearchRange } from '../../shared/types';
+import type { ConfirmationAnswer, ConfirmationRequest, Connection, ConnectionDetails, ConnectionInput, Entry, EntryTarget, SearchMatch, SearchRange } from '../../shared/types';
 import { breadcrumbs, formatBytes, getVisibleEntries, nodeKey, parentPrefix, type SortColumn, type SortDirection } from './model';
 import { useBrowser } from './useBrowser';
 import { useFileSearch } from './useFileSearch';
@@ -25,6 +25,7 @@ import { defaultPageSize } from '../../shared/page-size';
 import { storageUri, uriLabel } from '../../shared/storage-uri';
 import { matchConnectionUri, parseConnectionUri } from '../../shared/connection-uri-search';
 import { isSearchAllowed, normalizeSearchOptions } from '../../shared/search-options';
+import { withoutDeletedEntries } from '../../shared/deleted-entries';
 
 const rangeLabels: Record<SearchRange, string> = { page: 'This page', folder: 'This folder', recursive: 'All subfolders', key: 'Full S3 key' };
 const matchLabels: Record<SearchMatch, string> = { prefix: 'Prefix', contains: 'Contains', exact: 'Exact file name', regex: 'Regex' };
@@ -134,6 +135,11 @@ export default function App() {
     catch { notify('Unable to copy to clipboard'); }
   }, [notify]);
   const refresh = useCallback(() => { setUriResult(null); if (location) void browser.load(location.connectionId, location.prefix, true); }, [location, browser.load]);
+  const removeDeletedResults = (id: string, prefix: string, deleted: EntryTarget[]) => {
+    search.removeEntries(id, prefix, deleted);
+    setUriResult(current => current?.connectionId === id && current.prefix === prefix
+      ? { ...current, entries: withoutDeletedEntries(current.entries, deleted) } : current);
+  };
   const up = () => { if (parent !== null && location) browser.navigate({ ...location, prefix: parent }); };
 
   const submitUri = async () => {
@@ -186,7 +192,7 @@ export default function App() {
         if (groupId !== null) setTransferDirection('download');
       } else if (await window.s3.deleteEntry(connection.id, entry.key, entry.kind)) {
         notify(`${entry.name || 'Item'} deleted`);
-        if (search.active) search.setQuery('');
+        removeDeletedResults(connection.id, location.prefix, [{ key: entry.key, kind: entry.kind }]);
       }
     } catch (error) { notify(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : `Unable to ${action} this item`); }
     finally {
@@ -212,7 +218,10 @@ export default function App() {
       const result = action === 'download' ? await window.s3.downloadEntries(connection.id, targets) : await window.s3.deleteEntries(connection.id, targets);
       if (!result) return;
       if (action === 'download' && result.succeeded) setTransferDirection('download');
-      if (action === 'delete' && result.succeeded && search.active) search.setQuery('');
+      if (action === 'delete' && result.succeeded) {
+        const failed = new Set(result.failed.map(item => item.key));
+        removeDeletedResults(connection.id, location.prefix, targets.filter(item => !failed.has(item.key)));
+      }
       if (selectionScopeRef.current === selectionScope) setCheckedKeys(result.failed.length ? new Set(result.failed.map(item => item.key)) : new Set());
       if (result.failed.length) notify(`${result.succeeded} ${action === 'download' ? 'started' : 'deleted'}, ${result.failed.length} failed: ${result.failed[0].message}`);
       else notify(action === 'download' ? `${result.succeeded} downloads started` : `${result.succeeded} items deleted`);

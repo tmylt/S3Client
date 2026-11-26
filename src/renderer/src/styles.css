@@ -418,6 +418,7 @@ fieldset { padding: 0; border: 0; margin: 0; min-width: 0; }
 .transfer-progress { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 .transfer-progress > span { font-size: 9px; color: #8e9aac; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .transfer-progress > .transfer-speed { min-width: 54px; text-align: right; color: #6f7e93; }
+.transfer-progress > .transfer-eta { min-width: 76px; text-align: right; color: #6f7e93; }
 .transfer-progress-track { flex: 1; min-width: 20px; height: 5px; border-radius: 4px; background: #edf1f7; overflow: hidden; }
 .transfer-progress-track > div { height: 100%; background: #80a8e7; border-radius: inherit; }
 .transfer-item-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 9px; }

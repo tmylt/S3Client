@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Entry, FolderStats, RemoteSearchRange, SearchMatch, SearchOptions, SearchRange } from '../../shared/types';
+import type { Entry, EntryTarget, FolderStats, RemoteSearchRange, SearchMatch, SearchOptions, SearchRange } from '../../shared/types';
 import { getVisibleEntries, type SortColumn, type SortDirection } from './model';
 import { defaultPageSize, isPageSize } from '../../shared/page-size';
 import { compileSearchRegex } from '../../shared/search-regex';
 import { availableSearchRanges, isSearchAllowed, normalizeSearchOptions, resolveSearchMode } from '../../shared/search-options';
+import { withoutDeletedEntries } from '../../shared/deleted-entries';
 
 interface Result {
   connectionId: string;
@@ -101,6 +102,19 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
     setResult(current => current?.connectionId === id ? { ...current, entries: current.entries.map(entry => entry.kind === 'folder' && entry.key === key ? { ...entry, stats } : entry) } : current);
   }, []);
 
+  const removeEntries = useCallback((id: string, folder: string, deleted: EntryTarget[]) => {
+    setResult(current => {
+      if (!current || current.connectionId !== id || current.prefix !== folder || !deleted.length) return current;
+      const entries = withoutDeletedEntries(current.entries, deleted);
+      return entries.length === current.entries.length ? current : { ...current, entries };
+    });
+  }, []);
+
+  useEffect(() => {
+    const lastPage = Math.max(0, Math.ceil((activeResult?.entries.length ?? 0) / pageSize) - 1);
+    setRecursivePage(current => current > lastPage ? lastPage : current);
+  }, [activeResult?.entries.length, pageSize]);
+
   const sorted = useCallback((column: SortColumn, direction: SortDirection) => getVisibleEntries(activeResult?.entries || [], '', column, direction), [activeResult]);
   const displayEntries = useCallback((column: SortColumn, direction: SortDirection) => {
     const entries = sorted(column, direction);
@@ -111,5 +125,5 @@ export function useFileSearch(connectionId?: string, prefix?: string, pageSize =
   const pageIndex = locallyPaged ? recursivePage : activeResult?.pageIndex ?? 0;
   const active = available && range !== 'page' && Boolean(query) && (Boolean(activeResult) || loading || Boolean(error));
 
-  return { range, match, available, availableRanges, availableMatches, query, patternError, setRange, setMatch, setQuery, submit, active, result: activeResult, error, loading, pageSize, pageIndex, hasNext, next, previous, setPageSize, displayEntries, invalidate, setEntryStats };
+  return { range, match, available, availableRanges, availableMatches, query, patternError, setRange, setMatch, setQuery, submit, active, result: activeResult, error, loading, pageSize, pageIndex, hasNext, next, previous, setPageSize, displayEntries, invalidate, setEntryStats, removeEntries };
 }

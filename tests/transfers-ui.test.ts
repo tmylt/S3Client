@@ -306,6 +306,25 @@ describe('transfer panel', () => {
     emit({ ...snapshot, tasks: [task({ direction, status: 'completed', bytesPerSecond: 1_200_000 })] });
     expect(within(dialog).queryByText(/B\/s/)).toBeNull();
   });
+  it.each(['download', 'upload'] as const)('shows a readable remaining time for active %s files', async direction => {
+    const item = task({ direction, size: 10_000_000, transferred: 1_000_000, bytesPerSecond: 75_000 });
+    const snapshot = { ...emptyTransferSnapshot(), tasks: [item] };
+    const { emit } = api(connection, snapshot);
+    render(createElement(App));
+    fireEvent.click(await screen.findByRole('button', { name: direction === 'download' ? /Downloads/ : /Uploads/ }));
+    const dialog = await screen.findByRole('dialog', { name: direction === 'download' ? 'Downloads' : 'Uploads' });
+    expect(within(dialog).getByText('2 min left')).toBeTruthy();
+    emit({ ...snapshot, tasks: [{ ...item, transferred: 5_000_000, bytesPerSecond: 100_000 }] });
+    expect(within(dialog).getByText('50 sec left')).toBeTruthy();
+    emit({ ...snapshot, tasks: [{ ...item, bytesPerSecond: 0 }] });
+    expect(within(dialog).getByText('Estimating…')).toBeTruthy();
+    emit({ ...snapshot, tasks: [{ ...item, transferred: item.size, bytesPerSecond: 100_000 }] });
+    expect(within(dialog).getByText('Finishing…')).toBeTruthy();
+    emit({ ...snapshot, tasks: [{ ...item, isDirectory: true }] });
+    expect(within(dialog).queryByText(/left|Estimating|Finishing/)).toBeNull();
+    emit({ ...snapshot, tasks: [{ ...item, status: 'paused' }] });
+    expect(within(dialog).queryByText(/left|Estimating|Finishing/)).toBeNull();
+  });
   it('shows progress and preparation, supports controls, traps focus, and restores the opener', async () => {
     const snapshot = { ...emptyTransferSnapshot(), tasks: [task(), task({ id: 'paused', relativePath: 'paused.txt', status: 'paused', transferred: 0 }), task({ id: 'done', relativePath: 'done.txt', status: 'completed', transferred: 100 })], preparations: [{ id: 'scan', direction: 'download' as const, connectionId: 'a', name: 'folder', status: 'preparing' as const }] };
     const { bridge, emit } = api(connection, snapshot); const { container } = render(createElement(App));

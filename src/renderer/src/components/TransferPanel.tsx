@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, LoaderCircle, Trash2, X } from 'lucide-react';
 import type { TransferAction, TransferDirection, TransferPreparation, TransferSnapshot, TransferTask } from '../../../shared/transfers';
 import { formatBytes } from '../model';
-import { formatTransferSpeed } from '../../../shared/transfer-speed';
+import { formatTransferSpeed, formatTransferTimeRemaining } from '../../../shared/transfer-speed';
 import { storageUri } from '../../../shared/storage-uri';
 import { TransferCopyMenu } from './TransferCopyMenu';
 
@@ -97,12 +97,13 @@ export function TransferPanel({ direction, snapshot, uriSchemes, error, onClose,
           const percent = item.size > 0 ? Math.min(100, Math.max(0, Math.floor(item.transferred / item.size * 100))) : item.status === 'completed' ? 100 : 0;
           const resumable = item.status === 'paused' || item.status === 'failed';
           const active = item.status === 'running' || item.status === 'queued';
+          const timeRemaining = item.status === 'running' && !item.isDirectory ? formatTransferTimeRemaining(item.size - item.transferred, item.bytesPerSecond ?? 0) : null;
           return <article className="transfer-item" key={item.id} aria-label={item.relativePath} tabIndex={0} onContextMenu={event => { event.preventDefault(); menuTrigger.current = event.currentTarget; setCopyTarget({ id: item.id, x: event.clientX, y: event.clientY }); }}>
             <div className="transfer-item-heading"><strong title={item.relativePath}>{item.relativePath}</strong><div className="transfer-item-tools"><span className={`transfer-status ${item.status}`}>{statusLabels[item.status]}</span>{removeButton(item.id, item.relativePath)}</div></div>
             <p className="transfer-connection">{item.connectionName} · {storageUri({ bucket: item.bucket, uriScheme: uriSchemes[item.connectionId] }, item.key)}</p>
             <p className="transfer-local-path"><span>{direction === 'download' ? 'Destination' : 'Source'}</span> {item.localPath}</p>
             {item.resumeNote && <p className="transfer-resume-note">{item.resumeNote}</p>}
-            <div className="transfer-progress"><div className="transfer-progress-track" role="progressbar" aria-label={`Progress for ${item.relativePath}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><div style={{ width: `${percent}%` }} /></div><span>{formatBytes(item.transferred)} / {formatBytes(item.size)} · {percent}%</span>{item.status === 'running' && !item.isDirectory && <span className="transfer-speed" title="Average speed for the current transfer attempt">{formatTransferSpeed(item.bytesPerSecond ?? 0)}</span>}</div>
+            <div className="transfer-progress"><div className="transfer-progress-track" role="progressbar" aria-label={`Progress for ${item.relativePath}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><div style={{ width: `${percent}%` }} /></div><span>{formatBytes(item.transferred)} / {formatBytes(item.size)} · {percent}%</span>{item.status === 'running' && !item.isDirectory && <><span className="transfer-speed" title="Average speed for the current transfer attempt">{formatTransferSpeed(item.bytesPerSecond ?? 0)}</span><span className="transfer-eta" title="Estimated time remaining at the current average speed">{item.transferred >= item.size ? 'Finishing…' : timeRemaining ? `${timeRemaining} left` : 'Estimating…'}</span></>}</div>
             {item.error && <p className="transfer-error">{item.error}</p>}
             {(active || resumable) && <div className="transfer-item-actions"><button className="button secondary" disabled={clearing || removing.has(item.id)} aria-label={`${resumable ? direction === 'download' && item.transferred > 0 ? 'Resume' : 'Start' : 'Stop'} ${item.relativePath}`} onClick={() => control(item.id, resumable ? 'start' : 'stop')}>{resumable ? direction === 'download' && item.transferred > 0 ? 'Resume' : 'Start' : 'Stop'}</button><button className="button secondary" disabled={clearing || removing.has(item.id)} aria-label={`Cancel ${item.relativePath}`} onClick={() => control(item.id, 'cancel')}>Cancel</button></div>}
           </article>;
